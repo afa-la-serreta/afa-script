@@ -1,0 +1,190 @@
+<!doctype html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      :root { color-scheme: light; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; background: #f6f7f9; }
+      .wrap { max-width: 820px; margin: 0 auto; padding: 20px; }
+      .card { background: #fff; border-radius: 16px; padding: 18px; box-shadow: 0 6px 20px rgba(0,0,0,.06); margin-bottom: 14px; }
+      h1 { font-size: 20px; margin: 0 0 8px; }
+      h2 { font-size: 16px; margin: 0 0 12px; }
+      .muted { color: #666; font-size: 13px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+      label { display: block; font-size: 13px; color: #333; margin: 0 0 6px; }
+      input, select { width: 100%; padding: 10px 12px; border: 1px solid #d9dde3; border-radius: 10px; font-size: 14px; }
+      .row { margin-bottom: 12px; }
+      .actions { display:flex; gap: 10px; align-items:center; }
+      button { border: 0; border-radius: 12px; padding: 10px 14px; font-weight: 600; cursor: pointer; }
+      .primary { background: #0b6; color: #fff; }
+      .secondary { background: #eef1f5; color: #222; }
+      .status { font-size: 13px; }
+      .warn { color: #7a4; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>Actualitza les teves dades de l’AFA</h1>
+        <div class="muted">
+          Fitxa de: <b><?= data.g1_nom ?> <?= data.g1_cognoms ?></b>
+          <? if (data.g2_nom || data.g2_cognoms) { ?> · <b><?= data.g2_nom ?> <?= data.g2_cognoms ?></b><? } ?>
+        </div>
+        <p class="muted">
+          No reenviïs aquest enllaç. Qui el tingui pot editar aquesta fitxa.
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>Contacte</h2>
+        <div class="grid">
+          <div class="row">
+            <label>Email (tutor/a 1)</label>
+            <input id="g1_email" value="<?= data.g1_email ?>">
+          </div>
+          <div class="row">
+            <label>Telèfon (tutor/a 1)</label>
+            <input id="g1_telefon" value="<?= data.g1_telefon ?>">
+          </div>
+        </div>
+
+        <div class="grid">
+          <div class="row">
+            <label>Email (tutor/a 2)</label>
+            <input id="g2_email" value="<?= data.g2_email ?>">
+          </div>
+          <div class="row">
+            <label>Telèfon (tutor/a 2)</label>
+            <input id="g2_telefon" value="<?= data.g2_telefon ?>">
+          </div>
+        </div>
+
+        <div class="row">
+          <label>Correu alternatiu</label>
+          <input id="email_alternatiu" value="<?= data.email_alternatiu ?>">
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Adreça</h2>
+        <div class="row">
+          <label>Adreça (tutor/a 1)</label>
+          <input id="g1_adreca" value="<?= data.g1_adreca ?>">
+        </div>
+        <div class="grid">
+          <div class="row">
+            <label>Població (tutor/a 1)</label>
+            <input id="g1_poblacio" value="<?= data.g1_poblacio ?>">
+          </div>
+          <div class="row">
+            <label>Codi postal (tutor/a 1)</label>
+            <input id="g1_cp" value="<?= data.g1_cp ?>">
+          </div>
+        </div>
+
+        <div class="row">
+          <label>Adreça (tutor/a 2)</label>
+          <input id="g2_adreca" value="<?= data.g2_adreca ?>">
+        </div>
+        <div class="grid">
+          <div class="row">
+            <label>Població (tutor/a 2)</label>
+            <input id="g2_poblacio" value="<?= data.g2_poblacio ?>">
+          </div>
+          <div class="row">
+            <label>Codi postal (tutor/a 2)</label>
+            <input id="g2_cp" value="<?= data.g2_cp ?>">
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Infants</h2>
+        <? for (var i=1; i<=4; i++) { ?>
+          <div class="grid" style="margin-bottom:12px;">
+            <div class="row">
+              <label>Nom (infant <?= i ?>)</label>
+              <input id="c<?= i ?>_nom" value="<?= data['c'+i+'_nom'] ?>">
+            </div>
+            <div class="row">
+              <label>Cognoms (infant <?= i ?>)</label>
+              <input id="c<?= i ?>_cognoms" value="<?= data['c'+i+'_cognoms'] ?>">
+            </div>
+          </div>
+          <div class="row" style="margin-bottom:18px;">
+            <label>Data naixement (infant <?= i ?>)</label>
+            <input id="c<?= i ?>_dob" value="<?= data['c'+i+'_dob'] ?>" placeholder="YYYY-MM-DD o tal com ho tens ara">
+          </div>
+        <? } ?>
+      </div>
+
+      <div class="card">
+        <h2>Consentiments</h2>
+        <div class="row">
+          <label>a) Imatge activitats AFA</label>
+          <input id="consent_a" value="<?= data.consent_a ?>" placeholder="Sí/No (tal com ho teniu a la sheet)">
+        </div>
+        <div class="row">
+          <label>b) Calendari 6è</label>
+          <input id="consent_b" value="<?= data.consent_b ?>" placeholder="Sí/No">
+        </div>
+        <div class="row">
+          <label>c) WhatsApp o similar</label>
+          <input id="consent_c" value="<?= data.consent_c ?>" placeholder="Sí/No">
+        </div>
+
+        <p class="muted warn">
+          Dades bancàries i DNI: si cal canviar-les, feu-ho via tresoreria (o afegim un pas extra de verificació).
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="actions">
+          <button class="primary" onclick="save()">Guardar</button>
+          <button class="secondary" onclick="reset()">Desfer canvis</button>
+          <span class="status" id="status"></span>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const TOKEN = "<?= token ?>";
+      const initial = snapshot();
+
+      function snapshot() {
+        const ids = [
+          'g1_email','g1_telefon','g1_adreca','g1_poblacio','g1_cp',
+          'g2_email','g2_telefon','g2_adreca','g2_poblacio','g2_cp',
+          'email_alternatiu',
+          'c1_nom','c1_cognoms','c1_dob','c2_nom','c2_cognoms','c2_dob',
+          'c3_nom','c3_cognoms','c3_dob','c4_nom','c4_cognoms','c4_dob',
+          'consent_a','consent_b','consent_c'
+        ];
+        const obj = {};
+        ids.forEach(id => obj[id] = (document.getElementById(id).value || '').trim());
+        return obj;
+      }
+
+      function reset() {
+        Object.entries(initial).forEach(([id, v]) => document.getElementById(id).value = v);
+        setStatus('Canvis desfets.', false);
+      }
+
+      function setStatus(msg, isError) {
+        const el = document.getElementById('status');
+        el.textContent = msg;
+        el.style.color = isError ? '#b00' : '#2b6';
+      }
+
+      function save() {
+        setStatus('Guardant...', false);
+        const payload = snapshot();
+        google.script.run
+          .withSuccessHandler(() => setStatus('Guardat.', false))
+          .withFailureHandler(err => setStatus(err?.message || String(err), true))
+          .saveFamily(TOKEN, payload);
+      }
+    </script>
+  </body>
+</html>
