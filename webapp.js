@@ -5,29 +5,39 @@
 
 /**
  * GET /?token=...
- * Renderitza el formulari d’edició
+ * GET /?token=...&action=baixa
+ * Renderitza el formulari d'edició o la pàgina de baixa.
  */
 function doGet(e) {
   const token = (e.parameter && e.parameter.token) ? String(e.parameter.token).trim() : '';
-  if (!token) return htmlMessage_('Falta el token de l’enllaç.');
+  const action = (e.parameter && e.parameter.action) ? String(e.parameter.action).trim() : '';
+
+  if (!token) return htmlMessage_("Falta el token de l'enlla\u00e7.");
 
   const canon = SpreadsheetApp.getActive().getSheetByName(SHEET_CANON);
-  if (!canon) return htmlMessage_('No existeix la base de dades de famílies.');
+  if (!canon) return htmlMessage_("No existeix la base de dades de fam\u00edlies.");
 
   const rows = canon.getDataRange().getValues();
-  if (rows.length < 2) return htmlMessage_('Encara no hi ha cap família registrada.');
+  if (rows.length < 2) return htmlMessage_("Encara no hi ha cap fam\u00edlia registrada.");
 
   const headers = rows[0];
   const h = headerIndex_(headers);
 
   const match = findRowByToken_(rows, h.token_edit, token);
-  if (!match) return htmlMessage_('Enllaç invàlid o caducat.');
+  if (!match) return htmlMessage_("Enlla\u00e7 inv\u00e0lid o caducat.");
 
   const row = rows[match.r];
 
   // No mostrem famílies inactives
   if (row[h.status] === 'INACTIVE') {
-    return htmlMessage_('Aquesta família ja no està activa a l’AFA.');
+    return htmlMessage_("Aquesta fam\u00edlia ja no est\u00e0 activa a l'AFA.");
+  }
+
+  // Pàgina de baixa voluntària
+  if (action === 'baixa') {
+    const nom = (row[h.g1_nom] || '').toString().trim();
+    const cognoms = (row[h.g1_cognoms] || '').toString().trim();
+    return htmlBaixaPage_(token, nom, cognoms);
   }
 
   const dto = toEditableDto_(headers, row);
@@ -48,7 +58,7 @@ function doGet(e) {
 function saveFamily(token, payload) {
   token = String(token || '').trim();
   if (!token) throw new Error('Falta token.');
-  if (!payload || typeof payload !== 'object') throw new Error('Payload invàlid.');
+  if (!payload || typeof payload !== 'object') throw new Error('Payload inv\u00e0lid.');
 
   const canon = SpreadsheetApp.getActive().getSheetByName(SHEET_CANON);
   const rows = canon.getDataRange().getValues();
@@ -56,7 +66,7 @@ function saveFamily(token, payload) {
   const h = headerIndex_(headers);
 
   const match = findRowByToken_(rows, h.token_edit, token);
-  if (!match) throw new Error('Token invàlid.');
+  if (!match) throw new Error('Token inv\u00e0lid.');
 
   const rowIndex1 = match.r + 1;
   const row = rows[match.r];
@@ -93,7 +103,7 @@ function saveFamily(token, payload) {
 }
 
 /**
- * Baixa soft: família ha acabat 6è
+ * Baixa voluntària: la família demana donar-se de baixa.
  */
 function deactivateFamily(token) {
   token = String(token || '').trim();
@@ -105,13 +115,13 @@ function deactivateFamily(token) {
   const h = headerIndex_(headers);
 
   const match = findRowByToken_(rows, h.token_edit, token);
-  if (!match) throw new Error('Token invàlid.');
+  if (!match) throw new Error('Token inv\u00e0lid.');
 
   const rowIndex1 = match.r + 1;
   const row = rows[match.r];
 
   row[h.status] = 'INACTIVE';
-  row[h.inactive_reason] = 'GRADUATED_6E';
+  row[h.inactive_reason] = 'baixa volunt\u00e0ria';
   row[h.inactive_at] = new Date();
   row[h.updated_at] = new Date();
 
@@ -130,10 +140,101 @@ function include(filename) {
 function htmlMessage_(msg) {
   return HtmlService.createHtmlOutput(
     `<div style="font-family:system-ui;padding:24px;max-width:720px;margin:0 auto">
-      <h2>Actualitza dades AFA</h2>
+      <h2>AFA La Serreta</h2>
       <p>${escapeHtml_(msg)}</p>
      </div>`
-  ).setTitle("Actualitza dades AFA");
+  ).setTitle("AFA La Serreta");
+}
+
+/**
+ * Pàgina de confirmació de baixa voluntària.
+ */
+function htmlBaixaPage_(token, nom, cognoms) {
+  const fullName = escapeHtml_([nom, cognoms].filter(Boolean).join(' ') || 'fam\u00edlia');
+
+  const html = `<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; background: #f6f7f9; }
+    .wrap { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .card { background: #fff; border-radius: 16px; padding: 24px; box-shadow: 0 6px 20px rgba(0,0,0,.06); }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    .warn { background: #fff3e0; border-left: 4px solid #e65100; padding: 12px 16px; border-radius: 8px; margin: 16px 0; }
+    button { border: 0; border-radius: 12px; padding: 12px 20px; font-weight: 600; cursor: pointer; font-size: 14px; }
+    .danger { background: #d32f2f; color: #fff; }
+    .secondary { background: #eef1f5; color: #222; }
+    .actions { display: flex; gap: 12px; align-items: center; margin-top: 20px; }
+    .status { font-size: 14px; margin-top: 12px; }
+    .done { text-align: center; }
+    .done h2 { color: #2e7d32; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" id="confirmCard">
+      <h1>Baixa de l'AFA La Serreta</h1>
+      <p>Fitxa de: <b>${fullName}</b></p>
+
+      <div class="warn">
+        <b>Atenci&oacute;:</b> Si confirmeu la baixa, la vostra fam&iacute;lia deixar&agrave; de ser s&ograve;cia de l'AFA.
+        Aquesta acci&oacute; no es pot desfer des d'aqu&iacute;.
+      </div>
+
+      <p>Esteu segurs que voleu donar-vos de baixa?</p>
+
+      <div class="actions">
+        <button class="danger" onclick="confirmarBaixa()">S&iacute;, vull donar-me de baixa</button>
+        <button class="secondary" onclick="cancelar()">Cancel&middot;lar</button>
+      </div>
+
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="card done" id="doneCard" style="display:none;">
+      <h2>Baixa confirmada</h2>
+      <p>La vostra fam&iacute;lia ha estat donada de baixa de l'AFA La Serreta.</p>
+      <p>Si ha estat un error, poseu-vos en contacte amb la junta de l'AFA.</p>
+    </div>
+  </div>
+
+  <script>
+    var TOKEN = "${token}";
+
+    function cancelar() {
+      document.getElementById('confirmCard').innerHTML =
+        '<div style="text-align:center;padding:24px;">' +
+        '<h2 style="color:#2e7d32;">Cap canvi realitzat</h2>' +
+        '<p>No us heu donat de baixa. Podeu tancar aquesta pestanya.</p>' +
+        '</div>';
+      try { google.script.host.close(); } catch(e) {}
+    }
+
+    function confirmarBaixa() {
+      document.getElementById('status').textContent = 'Processant...';
+      document.querySelector('.danger').disabled = true;
+
+      google.script.run
+        .withSuccessHandler(function() {
+          document.getElementById('confirmCard').style.display = 'none';
+          document.getElementById('doneCard').style.display = 'block';
+        })
+        .withFailureHandler(function(err) {
+          document.getElementById('status').textContent = 'Error: ' + (err.message || err);
+          document.getElementById('status').style.color = '#d32f2f';
+          document.querySelector('.danger').disabled = false;
+        })
+        .deactivateFamily(TOKEN);
+    }
+  </script>
+</body>
+</html>`;
+
+  return HtmlService.createHtmlOutput(html)
+    .setTitle("Baixa AFA La Serreta")
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 function escapeHtml_(s) {

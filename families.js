@@ -17,11 +17,14 @@
 
 function onOpen() {
   SpreadsheetApp.getUi()
-    .createMenu('AFA')
-    .addItem('Importar totes les respostes', 'importAll')
-    .addItem('Buscar possibles duplicats', 'findPotentialDuplicatesAll')
+    .createMenu('\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67 AFA')
+    .addItem('\uD83D\uDCE5 Importar totes les respostes', 'importAll')
+    .addItem('\uD83D\uDD0D Buscar possibles duplicats', 'findPotentialDuplicatesAll')
+    .addItem('\uD83D\uDD04 Sincronitzar edicions', 'syncEdited')
     .addSeparator()
-    .addItem('Desactivar famílies graduades (6è)', 'deactivateGraduatedFamilies')
+    .addItem('\uD83C\uDF93 Desactivar fam\u00edlies graduades (6\u00e8)', 'deactivateGraduatedFamilies')
+    .addSeparator()
+    .addItem('\u2709\uFE0F Enviar correu de confirmaci\u00f3', 'sendConfirmationEmails')
     .addToUi();
 }
 
@@ -200,6 +203,78 @@ function findPotentialDuplicatesAll() {
 }
 
 /* =========================
+   Sincronització incremental (edicions)
+   ========================= */
+
+/**
+ * Sincronitza respostes editades.
+ * Guarda la data de l'última sincronització a PropertiesService
+ * i només re-processa respostes amb timestamp posterior.
+ * Pensat per executar-se amb un trigger temporitzat (cada 15 min).
+ */
+function syncEdited() {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(SHEET_RESPONSES);
+  var canon = ss.getSheetByName(SHEET_CANON);
+
+  if (!sh || !canon) return;
+
+  var props = PropertiesService.getScriptProperties();
+  var lastSyncStr = props.getProperty('syncEdited_lastRun');
+  var lastSyncMs;
+
+  if (lastSyncStr) {
+    lastSyncMs = Number(lastSyncStr);
+  } else {
+    // Primera execució: agafar el timestamp més recent de Famílies
+    var canonValues = canon.getDataRange().getValues();
+    if (canonValues.length < 2) return;
+    var canonHeaders = canonValues[0].map(function(h) { return String(h).trim(); });
+    var idxC = headerIndex_(canonHeaders);
+    if (idxC.source_last_timestamp == null) return;
+
+    lastSyncMs = 0;
+    for (var r = 1; r < canonValues.length; r++) {
+      var ts = canonValues[r][idxC.source_last_timestamp];
+      var ms = (ts instanceof Date) ? ts.getTime() : new Date(ts).getTime();
+      if (!isNaN(ms) && ms > lastSyncMs) lastSyncMs = ms;
+    }
+  }
+
+  // Escanejar respostes amb timestamp posterior a l'última sincronització
+  var respValues = sh.getDataRange().getValues();
+  if (respValues.length < 2) return;
+
+  var rawHeaders = respValues[0].map(function(h) { return h == null ? '' : String(h); });
+  var headers = makeUniqueHeaders_(rawHeaders);
+  var tsCol = headers.indexOf('Marca temporal');
+
+  var changed = [];
+  for (var i = 1; i < respValues.length; i++) {
+    var rowTs = respValues[i][tsCol >= 0 ? tsCol : 0];
+    var tsMs = (rowTs instanceof Date) ? rowTs.getTime() : new Date(rowTs).getTime();
+    if (!isNaN(tsMs) && tsMs > lastSyncMs) {
+      changed.push({ row: respValues[i], rowNumber: i + 1 });
+    }
+  }
+
+  // Guardar marca temporal ABANS de processar (per evitar saltar-se res)
+  props.setProperty('syncEdited_lastRun', String(Date.now()));
+
+  if (changed.length === 0) return;
+
+  // Re-processar només les files canviades
+  var upserted = 0;
+  for (var j = 0; j < changed.length; j++) {
+    var parsed = parseResponseRow_(headers, changed[j].row, changed[j].rowNumber);
+    upsertSingleResponse_(parsed);
+    upserted++;
+  }
+
+  Logger.log('syncEdited: ' + upserted + ' respostes sincronitzades');
+}
+
+/* =========================
    Trigger incremental
    ========================= */
 
@@ -273,4 +348,222 @@ function deactivateGraduatedFamilies() {
 
   Logger.log(`deactivateGraduatedFamilies: desactivades=${deactivated}`);
   SpreadsheetApp.getActive().toast(`${deactivated} famílies desactivades`, 'Graduació ✓');
+}
+
+/* =========================
+   Enviament de correus de confirmació
+   ========================= */
+
+/**
+ * Envia un correu de confirmació a totes les famílies ACTIVE
+ * amb les dades bancàries emmascarades i un enllaç per editar
+ * la seva resposta al Google Form original.
+ *
+ * Requereix:
+ * - El full de respostes estigui vinculat a un Google Form
+ * - El form tingui activada l'opció "Permet editar respostes"
+ */
+function sendConfirmationEmails() {
+  const ss = SpreadsheetApp.getActive();
+  const ui = SpreadsheetApp.getUi();
+  const canon = ss.getSheetByName(SHEET_CANON);
+  const respSheet = ss.getSheetByName(SHEET_RESPONSES);
+
+  if (!canon) throw new Error(`No trobo la pestanya: ${SHEET_CANON}`);
+  if (!respSheet) throw new Error(`No trobo la pestanya: ${SHEET_RESPONSES}`);
+
+  ss.toast('Preparant enviament...', 'AFA');
+
+  // Obtenir el form vinculat
+  const formUrl = respSheet.getFormUrl();
+  if (!formUrl) {
+    ui.alert('Error', 'El full de respostes no est\u00e0 vinculat a cap Google Form.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const form = FormApp.openByUrl(formUrl);
+  const formResponses = form.getResponses();
+
+  // Construir mapa: timestamp (ms) → editResponseUrl
+  const editUrlByTimestamp = new Map();
+  for (const resp of formResponses) {
+    const ts = resp.getTimestamp().getTime();
+    const editUrl = resp.getEditResponseUrl();
+    if (editUrl) editUrlByTimestamp.set(ts, editUrl);
+  }
+
+  // Construir mapa: email → editUrl (fallback)
+  // Usa les dades del full de respostes (ràpid) en lloc de la Forms API (lent).
+  const editUrlByEmail = new Map();
+  const respValues = respSheet.getDataRange().getValues();
+  if (respValues.length > 1) {
+    const respHeaders = makeUniqueHeaders_(respValues[0].map(h => (h == null ? '' : String(h))));
+    const emailColIdx = respHeaders.indexOf('Correu electr\u00f2nic:');
+    const tsColIdx = respHeaders.indexOf('Marca temporal');
+
+    if (emailColIdx >= 0 && tsColIdx >= 0) {
+      for (let i = 1; i < respValues.length; i++) {
+        const rowTs = respValues[i][tsColIdx];
+        const email = normEmail_(respValues[i][emailColIdx]);
+        if (!email || !rowTs) continue;
+
+        const tsMs = (rowTs instanceof Date) ? rowTs.getTime() : new Date(rowTs).getTime();
+        if (isNaN(tsMs)) continue;
+
+        const editUrl = editUrlByTimestamp.get(tsMs);
+        if (editUrl) editUrlByEmail.set(email, editUrl);
+      }
+    }
+  }
+
+  // Llegir famílies
+  const values = canon.getDataRange().getValues();
+  if (values.length < 2) return;
+
+  const headers = values[0].map(h => String(h).trim());
+  const idx = headerIndex_(headers);
+
+  ['status', 'g1_nom', 'g1_email', 'bank_iban', 'source_last_timestamp', 'token_edit'].forEach(c => {
+    if (idx[c] == null) throw new Error(`Falta la columna ${c} a ${SHEET_CANON}`);
+  });
+
+  // URL base del webapp (per al link de baixa)
+  const webappUrl = WEBAPP_URL;
+
+  // Preparar llista de destinataris
+  const toSend = [];
+  const skipped = [];
+
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    if (String(row[idx.status]).trim() !== 'ACTIVE') continue;
+
+    const email = normEmail_(row[idx.g1_email]);
+    const nom = (row[idx.g1_nom] || '').toString().trim();
+    const iban = (row[idx.bank_iban] || '').toString().trim();
+    const tokenEdit = (row[idx.token_edit] || '').toString().trim();
+
+    if (!email) {
+      skipped.push(`Fila ${r + 1}: sense email`);
+      continue;
+    }
+
+    // Trobar l'edit URL: primer per timestamp, després per email com a fallback
+    let editUrl = null;
+    const srcTs = row[idx.source_last_timestamp];
+    if (srcTs instanceof Date) {
+      editUrl = editUrlByTimestamp.get(srcTs.getTime()) || null;
+    } else if (srcTs) {
+      const d = new Date(srcTs);
+      if (!isNaN(d.getTime())) editUrl = editUrlByTimestamp.get(d.getTime()) || null;
+    }
+    if (!editUrl) {
+      editUrl = editUrlByEmail.get(email) || null;
+    }
+
+    if (!editUrl) {
+      skipped.push(`Fila ${r + 1} (${email}): sense URL d'edici\u00f3 del form`);
+      continue;
+    }
+
+    // URL de baixa voluntària via webapp
+    const baixaUrl = tokenEdit ? `${webappUrl}?token=${encodeURIComponent(tokenEdit)}&action=baixa` : null;
+
+    toSend.push({ email, nom, iban, editUrl, baixaUrl, sheetRow: r + 1 });
+  }
+
+  if (toSend.length === 0) {
+    ui.alert('Cap correu a enviar',
+      'No s\'han trobat famílies actives amb email i URL d\'edició vàlids.' +
+      (skipped.length ? '\n\nSaltades:\n' + skipped.join('\n') : ''),
+      ui.ButtonSet.OK);
+    return;
+  }
+
+  // Confirmació
+  const msg = `S'enviaran ${toSend.length} correus a famílies actives.` +
+    (skipped.length ? `\n\n${skipped.length} famílies saltades (sense email o URL).` : '') +
+    '\n\nVols continuar?';
+
+  const answer = ui.alert('Confirmar enviament', msg, ui.ButtonSet.YES_NO);
+  if (answer !== ui.Button.YES) {
+    ss.toast('Enviament cancel·lat.', 'Cancel·lat');
+    return;
+  }
+
+  // Enviar correus
+  let sent = 0;
+  let errors = 0;
+  const total = toSend.length;
+
+  for (const family of toSend) {
+    try {
+      const htmlBody = buildConfirmationEmailHtml_(family.nom, family.iban, family.editUrl, family.baixaUrl);
+
+      MailApp.sendEmail({
+        to: family.email,
+        subject: EMAIL_SUBJECT,
+        htmlBody: htmlBody,
+        name: EMAIL_SENDER_NAME,
+      });
+
+      sent++;
+      if (sent % 10 === 0 || sent === total) {
+        ss.toast(`Enviant ${sent} / ${total}...`, 'AFA');
+      }
+      Logger.log(`\u2713 Enviat a: ${family.email} (fila ${family.sheetRow})`);
+    } catch (err) {
+      errors++;
+      Logger.log(`\u2717 Error enviant a ${family.email}: ${err.message}`);
+    }
+  }
+
+  const result = `${sent} correus enviats` +
+    (errors ? `, ${errors} errors` : '') +
+    (skipped.length ? `, ${skipped.length} saltades` : '');
+
+  Logger.log(`sendConfirmationEmails: ${result}`);
+  ss.toast(result, 'Enviament completat ✓');
+}
+
+/**
+ * Genera l'HTML del correu de confirmació.
+ */
+function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl) {
+  const masked = maskIban_(iban);
+  const ibanLine = masked
+    ? `El compte bancari que tenim enregistrat acaba en <b>${masked}</b>.`
+    : 'No tenim cap compte bancari enregistrat per a la vostra fam&iacute;lia.';
+
+  const baixaLine = baixaUrl
+    ? `<p>Si voleu donar-vos de baixa de l'AFA, podeu fer-ho <a href="${baixaUrl}" style="color: #1a73e8;">aqu&iacute;</a>.</p>`
+    : '';
+
+  return `
+<div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+  <p>Bona tarda ${escapeHtml_(nom || 'fam\u00edlia')},</p>
+
+  <p>Encantats de saludar-vos.</p>
+
+  <p>Informar-vos que en breu es passar&agrave; la quota de l'AFA (<b>35,00 &euro;</b>) i volem confirmar que les vostres dades siguin correctes i vigents.</p>
+
+  <p>${ibanLine}</p>
+
+  <p>Si us plau, reviseu les vostres dades i actualitzeu-les si cal fent clic al bot&oacute; seg&uuml;ent:</p>
+
+  <p style="text-align: center; margin: 24px 0;">
+    <a href="${editUrl}" style="background-color: #0b6; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;">
+      Revisar i actualitzar les meves dades
+    </a>
+  </p>
+
+  ${baixaLine}
+
+  <p>Gr&agrave;cies per la vostra col&middot;laboraci&oacute; i participaci&oacute;!</p>
+
+  <p style="margin-top: 32px; color: #666; border-top: 1px solid #eee; padding-top: 16px;">
+    --<br>
+    <b>AFA La Serreta</b>
+  </p>
+</div>`;
 }

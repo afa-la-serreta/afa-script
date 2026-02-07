@@ -57,70 +57,72 @@ function strongKeysForCluster_(cluster) {
    Merge cluster -> fila canònica
    ========================= */
 
-function mergeClusterToCanonRow_(cluster, canonRow, idxC) {
+function mergeClusterToCanonRow_(cluster, canonRow, idxC, overwrite) {
   // Base = resposta més nova del cluster
+  // overwrite = true → sobreescriu camps existents (per a upsert d'edicions)
+  var ow = !!overwrite;
   const newest = cluster[0].raw;
 
   // timestamp d'origen (per auditar)
   setCanon_(canonRow, idxC, 'source_last_timestamp', newest['Marca temporal'], true);
 
   // Tutor 1
-  setCanon_(canonRow, idxC, 'g1_nom', newest['Nom:']);
-  setCanon_(canonRow, idxC, 'g1_cognoms', newest['Cognoms:']);
-  setCanon_(canonRow, idxC, 'g1_adreca', newest['Adreça:']);
-  setCanon_(canonRow, idxC, 'g1_poblacio', newest['Població:']);
-  setCanon_(canonRow, idxC, 'g1_cp', newest['Codi Postal:']);
-  setCanon_(canonRow, idxC, 'g1_email', newest['Correu electrònic:']);
-  setCanon_(canonRow, idxC, 'g1_telefon', newest['Telèfon:']);
-  setCanon_(canonRow, idxC, 'g1_vincle', newest["Vincle amb l'infant:"]);
+  setCanon_(canonRow, idxC, 'g1_nom', newest['Nom:'], ow);
+  setCanon_(canonRow, idxC, 'g1_cognoms', newest['Cognoms:'], ow);
+  setCanon_(canonRow, idxC, 'g1_adreca', newest['Adreça:'], ow);
+  setCanon_(canonRow, idxC, 'g1_poblacio', newest['Població:'], ow);
+  setCanon_(canonRow, idxC, 'g1_cp', newest['Codi Postal:'], ow);
+  setCanon_(canonRow, idxC, 'g1_email', newest['Correu electrònic:'], ow);
+  setCanon_(canonRow, idxC, 'g1_telefon', newest['Telèfon:'], ow);
+  setCanon_(canonRow, idxC, 'g1_vincle', newest["Vincle amb l'infant:"], ow);
 
   const dni1 = (newest['DNI:'] || '').toString().trim();
-  if (isValidDni_(dni1)) setCanon_(canonRow, idxC, 'g1_dni_hash', sha256_(dni1));
+  if (isValidDni_(dni1)) setCanon_(canonRow, idxC, 'g1_dni_hash', sha256_(dni1), ow);
 
   // Tutor 2
-  setCanon_(canonRow, idxC, 'g2_nom', newest['Nom:.1']);
-  setCanon_(canonRow, idxC, 'g2_cognoms', newest['Cognoms:.1']);
-  setCanon_(canonRow, idxC, 'g2_adreca', newest['Adreça:.1']);
-  setCanon_(canonRow, idxC, 'g2_poblacio', newest['Població:.1']);
-  setCanon_(canonRow, idxC, 'g2_cp', newest['Codi Postal:.1']);
-  setCanon_(canonRow, idxC, 'g2_email', newest['Correu electrònic:.1']);
-  setCanon_(canonRow, idxC, 'g2_telefon', newest['Telèfon:.1']);
-  setCanon_(canonRow, idxC, 'g2_vincle', newest["Vincle amb l'infant:.1"]);
+  setCanon_(canonRow, idxC, 'g2_nom', newest['Nom:.1'], ow);
+  setCanon_(canonRow, idxC, 'g2_cognoms', newest['Cognoms:.1'], ow);
+  setCanon_(canonRow, idxC, 'g2_adreca', newest['Adreça:.1'], ow);
+  setCanon_(canonRow, idxC, 'g2_poblacio', newest['Població:.1'], ow);
+  setCanon_(canonRow, idxC, 'g2_cp', newest['Codi Postal:.1'], ow);
+  setCanon_(canonRow, idxC, 'g2_email', newest['Correu electrònic:.1'], ow);
+  setCanon_(canonRow, idxC, 'g2_telefon', newest['Telèfon:.1'], ow);
+  setCanon_(canonRow, idxC, 'g2_vincle', newest["Vincle amb l'infant:.1"], ow);
 
   const dni2 = (newest['DNI:.1'] || '').toString().trim();
-  if (isValidDni_(dni2)) setCanon_(canonRow, idxC, 'g2_dni_hash', sha256_(dni2));
+  if (isValidDni_(dni2)) setCanon_(canonRow, idxC, 'g2_dni_hash', sha256_(dni2), ow);
 
   // Correu alternatiu
-  setCanon_(canonRow, idxC, 'email_alternatiu', newest['Correu alternatiu:']);
+  setCanon_(canonRow, idxC, 'email_alternatiu', newest['Correu alternatiu:'], ow);
 
   // Infants (1..4)
-  setCanon_(canonRow, idxC, 'c1_nom', newest['Nom:.2']);
-  setCanon_(canonRow, idxC, 'c1_cognoms', newest['Cognoms:.2']);
-  setCanon_(canonRow, idxC, 'c1_dob', newest['Data de naixement']);
+  setCanon_(canonRow, idxC, 'c1_nom', newest['Nom:.2'], ow);
+  setCanon_(canonRow, idxC, 'c1_cognoms', newest['Cognoms:.2'], ow);
+  setCanon_(canonRow, idxC, 'c1_dob', newest['Data de naixement'], ow);
 
-  setCanon_(canonRow, idxC, 'c2_nom', newest['Nom:.3']);
-  setCanon_(canonRow, idxC, 'c2_cognoms', newest['Cognoms:.3']);
-  setCanon_(canonRow, idxC, 'c2_dob', newest['Data de naixement.1']);
+  setCanon_(canonRow, idxC, 'c2_nom', newest['Nom:.3'], ow);
+  setCanon_(canonRow, idxC, 'c2_cognoms', newest['Cognoms:.3'], ow);
+  setCanon_(canonRow, idxC, 'c2_dob', newest['Data de naixement.1'], ow);
 
-  setCanon_(canonRow, idxC, 'c3_nom', newest['Nom:.4']);
-  setCanon_(canonRow, idxC, 'c3_cognoms', newest['Cognoms:.4']);
-  setCanon_(canonRow, idxC, 'c3_dob', newest['Data de naixement.2']);
+  setCanon_(canonRow, idxC, 'c3_nom', newest['Nom:.4'], ow);
+  setCanon_(canonRow, idxC, 'c3_cognoms', newest['Cognoms:.4'], ow);
+  setCanon_(canonRow, idxC, 'c3_dob', newest['Data de naixement.2'], ow);
 
-  setCanon_(canonRow, idxC, 'c4_nom', newest['Nom:.5']);
-  setCanon_(canonRow, idxC, 'c4_cognoms', newest['Cognoms:.5']);
-  setCanon_(canonRow, idxC, 'c4_dob', newest['Data de naixement.3']);
+  setCanon_(canonRow, idxC, 'c4_nom', newest['Nom:.5'], ow);
+  setCanon_(canonRow, idxC, 'c4_cognoms', newest['Cognoms:.5'], ow);
+  setCanon_(canonRow, idxC, 'c4_dob', newest['Data de naixement.3'], ow);
 
   // Banc
-  setCanon_(canonRow, idxC, 'bank_swift', newest['Entitat Bancària o SWIFT (Pot contenir 8 o 11 posicions):']);
-  setCanon_(canonRow, idxC, 'bank_iban', newest['Número de compte IBAN']);
+  setCanon_(canonRow, idxC, 'bank_swift', newest['Entitat Bancària o SWIFT (Pot contenir 8 o 11 posicions):'], ow);
+  setCanon_(canonRow, idxC, 'bank_iban', newest['Número de compte IBAN'], ow);
   const holderDni = (newest['DNI Titular compte:'] || '').toString().trim();
-  if (isValidDni_(holderDni)) setCanon_(canonRow, idxC, 'bank_holder_dni_hash', sha256_(holderDni));
-  setCanon_(canonRow, idxC, 'bank_holder_name', newest['Nom i cognoms del titular compte']);
+  if (isValidDni_(holderDni)) setCanon_(canonRow, idxC, 'bank_holder_dni_hash', sha256_(holderDni), ow);
+  setCanon_(canonRow, idxC, 'bank_holder_name', newest['Nom i cognoms del titular compte'], ow);
 
   // Consentiments
-  setCanon_(canonRow, idxC, 'consent_a', newest["a) Que la imatge del meu/s fill/s o filla/es pugui/n aparèixer en fotografies o vídeos corresponents a les activitats extraescolars o de l'Associació organitzades per l'AFA La Serreta i publicades al blog o a la pàgina web, així com en material de difusió (presentacions, impersos, díptics, cartells, etc.)"]);
-  setCanon_(canonRow, idxC, 'consent_b', newest["b) Que la imatge del meu/s fill/a pugui aparèixer en el calendari anual (o suport similar amb presència de fotografies o vídoes) realitzat per les famílies de 6è per recaptar fons pel viatge de fi de curs."]);
-  setCanon_(canonRow, idxC, 'consent_c', newest["c) Autorizo a l'ús del telèfon móbil amb la finalitat d'estar en els grups de missatgeria instantània com whatsapp o similars. "]);
+  setCanon_(canonRow, idxC, 'consent_a', newest["a) Que la imatge del meu/s fill/s o filla/es pugui/n aparèixer en fotografies o vídeos corresponents a les activitats extraescolars o de l'Associació organitzades per l'AFA La Serreta i publicades al blog o a la pàgina web, així com en material de difusió (presentacions, impersos, díptics, cartells, etc.)"], ow);
+  setCanon_(canonRow, idxC, 'consent_b', newest["b) Que la imatge del meu/s fill/a pugui aparèixer en el calendari anual (o suport similar amb presència de fotografies o vídoes) realitzat per les famílies de 6è per recaptar fons pel viatge de fi de curs."], ow);
+  setCanon_(canonRow, idxC, 'consent_c', newest["c) Autorizo a l'ús del telèfon móbil amb la finalitat d'estar en els grups de missatgeria instantània com whatsapp o similars."], ow);
 
   // Omple buits des d'altres respostes del cluster
   for (let k = 1; k < cluster.length; k++) {
@@ -352,14 +354,15 @@ function upsertSingleResponse_(parsed) {
     return;
   }
 
-  // UPDATE existent
+  // UPDATE existent — overwrite=true per reflectir edicions
   const rowIndex1 = hit + 1;
   const current = canonValues[hit].slice();
 
   const merged = mergeClusterToCanonRow_(
     [{ raw: parsed.raw, timestamp: parsed.timestamp, sheetRow: parsed.sheetRow }],
     current,
-    idxC
+    idxC,
+    true
   );
 
   // Traça: afegeix fila si no hi és

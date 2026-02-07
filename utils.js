@@ -91,6 +91,21 @@ function jaccardTokens_(a, b) {
 }
 
 /* =========================
+   IBAN
+   ========================= */
+
+/**
+ * Emmascara un IBAN mostrant només els últims 4 dígits.
+ * Ex: "ES12 3456 7890 1234 5678" → "****5678"
+ * Retorna '' si l'IBAN és buit o massa curt.
+ */
+function maskIban_(iban) {
+  const clean = (iban || '').toString().replace(/\s+/g, '');
+  if (clean.length < 4) return '';
+  return '****' + clean.slice(-4);
+}
+
+/* =========================
    Hashing
    ========================= */
 
