@@ -143,11 +143,7 @@ function escapeHtml_(s) {
     .replace(/'/g, '&#039;');
 }
 
-function headerIndex_(headers) {
-  const m = {};
-  headers.forEach((h, i) => m[String(h).trim()] = i);
-  return m;
-}
+// headerIndex_ definit a utils.gs (compartit)
 
 function findRowByToken_(rows, tokenColIndex, token) {
   for (let r = 1; r < rows.length; r++) {
