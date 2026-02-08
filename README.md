@@ -74,7 +74,7 @@ L'objectiu és:
 | `utils.js` | Helpers purs: normalització, hashing, timestamps, lògica de graduació, emmascarament IBAN, BIC lookup (full + IBANAPI) |
 | `parsing.js` | Parseig de respostes del formulari, correcció de columnes (`fixColumnShift_`) |
 | `dedup.js` | Clustering Union-Find, merge a fila canònica (amb suport overwrite), scoring, upsert incremental |
-| `families.js` | Entry points: `onOpen`, `importAll`, `findPotentialDuplicatesAll`, `onFormSubmit`, `syncEdited`, `deactivateGraduatedFamilies`, `sendConfirmationEmails` |
+| `families.js` | Entry points: `onOpen`, `importAll`, `findPotentialDuplicatesAll`, `onFormSubmit`, `syncEdited`, `deactivateGraduatedFamilies`, `sendConfirmationEmails`, `previewAllConfirmationEmails` |
 | `webapp.js` | Web app per edició via magic link i baixa voluntària |
 | `sepa.js` | Generació XML SEPA Direct Debit (pain.008.001.02 / Cuaderno 19.44) |
 | `sepa_dialog.html` | Formulari HTML per als paràmetres SEPA (data picker, import, concepte) |
@@ -126,8 +126,13 @@ El menú **AFA** apareix automàticament al obrir el full de càlcul (`onOpen`):
 
 El correu inclou:
 - IBAN emmascarar (últims 4 dígits), o avís si l'IBAN és invàlid
+- Infants actius amb el curs calculat (I3..6è); els graduats no apareixen
+- Adreça registrada (o avís si no n'hi ha)
+- Suggeriment d'actualitzar dades si tenen nous infants o canvis
 - Botó per editar la resposta al Google Form
 - Enllaç per donar-se de baixa (baixa voluntària via webapp)
+
+Per previsualitzar tots els correus sense enviar-los, executar `previewAllConfirmationEmails()` des de l'editor d'Apps Script. Genera un fitxer HTML a Google Drive.
 
 ### Generació de rebuts SEPA (pas 3)
 1. S'obre un formulari amb data picker, import (per defecte 35 EUR) i concepte pre-omplerts

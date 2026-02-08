@@ -296,6 +296,24 @@ function graduationCutoffYear_() {
 }
 
 /**
+ * Retorna l'etiqueta del curs escolar (I3, I4, I5, 1r, 2n, 3r, 4t, 5è, 6è)
+ * a partir de l'any de naixement.
+ * Retorna null si l'infant ja ha acabat 6è o encara no ha començat escola.
+ */
+function childGrade_(birthYear) {
+  if (birthYear == null) return null;
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0-based
+  // Curs acadèmic actual: set-des → cursStart = year, gen-ago → cursStart = year - 1
+  var cursStart = month >= 8 ? year : year - 1;
+  var gradeIndex = cursStart - birthYear - 2;
+  var labels = ['I3', 'I4', 'I5', '1r', '2n', '3r', '4t', '5è', '6è'];
+  if (gradeIndex < 1 || gradeIndex > labels.length) return null;
+  return labels[gradeIndex - 1];
+}
+
+/**
  * Extreu l'any de naixement d'un valor DOB (Date, string, o number).
  * Retorna null si no es pot parsejar.
  */

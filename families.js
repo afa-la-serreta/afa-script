@@ -470,7 +470,9 @@ function sendConfirmationEmails() {
   const headers = values[0].map(h => String(h).trim());
   const idx = headerIndex_(headers);
 
-  ['status', 'g1_nom', 'g1_email', 'bank_iban', 'source_last_timestamp', 'token_edit', 'confirmation_sent_at'].forEach(c => {
+  ['status', 'g1_nom', 'g1_email', 'bank_iban', 'source_last_timestamp', 'token_edit', 'confirmation_sent_at',
+   'c1_nom', 'c1_dob', 'c2_nom', 'c2_dob', 'c3_nom', 'c3_dob', 'c4_nom', 'c4_dob',
+   'g1_adreca', 'g1_poblacio', 'g1_cp'].forEach(c => {
     if (idx[c] == null) throw new Error(`Falta la columna ${c} a ${SHEET_CANON}`);
   });
 
@@ -528,7 +530,30 @@ function sendConfirmationEmails() {
     var cleanIban = normIban_(iban);
     var ibanInvalid = !cleanIban || cleanIban.length !== 24 || cleanIban.substring(0, 2) !== 'ES';
 
-    toSend.push({ email, nom, iban, ibanInvalid, editUrl, baixaUrl, sheetRow: r + 1, canonRow: r });
+    // Recollir infants actius (nom + curs calculat, excloent graduats)
+    var children = [];
+    var childSlots = [
+      { nom: 'c1_nom', dob: 'c1_dob' },
+      { nom: 'c2_nom', dob: 'c2_dob' },
+      { nom: 'c3_nom', dob: 'c3_dob' },
+      { nom: 'c4_nom', dob: 'c4_dob' }
+    ];
+    for (var s = 0; s < childSlots.length; s++) {
+      var childNom = (row[idx[childSlots[s].nom]] || '').toString().trim();
+      if (!childNom) continue;
+      var birthYear = extractBirthYear_(row[idx[childSlots[s].dob]]);
+      var grade = childGrade_(birthYear);
+      if (!grade) continue; // skip graduated or not-yet-in-school children
+      children.push({ nom: childNom, grade: grade });
+    }
+
+    // Recollir adreça
+    var adr = (row[idx.g1_adreca] || '').toString().trim();
+    var cp = (row[idx.g1_cp] || '').toString().trim();
+    var pobl = (row[idx.g1_poblacio] || '').toString().trim();
+    var address = [adr, cp, pobl].filter(function(x) { return x; }).join(', ');
+
+    toSend.push({ email, nom, iban, ibanInvalid, editUrl, baixaUrl, children, address, sheetRow: r + 1, canonRow: r });
   }
 
   if (toSend.length === 0) {
@@ -569,7 +594,7 @@ function sendConfirmationEmails() {
   for (let i = 0; i < maxToSend; i++) {
     const family = toSend[i];
     try {
-      const htmlBody = buildConfirmationEmailHtml_(family.nom, family.iban, family.editUrl, family.baixaUrl, family.ibanInvalid);
+      const htmlBody = buildConfirmationEmailHtml_(family.nom, family.iban, family.editUrl, family.baixaUrl, family.ibanInvalid, family.children, family.address);
 
       MailApp.sendEmail({
         to: family.email,
@@ -611,7 +636,7 @@ function sendConfirmationEmails() {
 /**
  * Genera l'HTML del correu de confirmació.
  */
-function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl, ibanInvalid) {
+function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl, ibanInvalid, children, address) {
   const masked = maskIban_(iban);
   var ibanLine;
   if (ibanInvalid) {
@@ -626,6 +651,29 @@ function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl, ibanInvalid) 
     ? `<p>Si voleu donar-vos de baixa de l'AFA, podeu fer-ho <a href="${baixaUrl}" style="color: #1a73e8;">aqu&iacute;</a>.</p>`
     : '';
 
+  // Construir secció d'infants
+  var childrenHtml = '';
+  if (children && children.length > 0) {
+    var items = children.map(function(c) {
+      var label = escapeHtml_(c.nom);
+      if (c.grade) {
+        label += ' <span style="color: #666;">(' + escapeHtml_(c.grade) + ')</span>';
+      }
+      return '<li style="margin: 4px 0;">' + label + '</li>';
+    }).join('\n          ');
+    childrenHtml = '<b>Infants enregistrats:</b>\n        <ul style="margin: 6px 0; padding-left: 20px;">\n          ' + items + '\n        </ul>';
+  } else {
+    childrenHtml = '<b>Infants enregistrats:</b> cap';
+  }
+
+  // Construir secció d'adreça
+  var addressHtml = '';
+  if (address) {
+    addressHtml = '<b>Adre&ccedil;a:</b> ' + escapeHtml_(address);
+  } else {
+    addressHtml = '<b>Adre&ccedil;a:</b> no enregistrada';
+  }
+
   return `
 <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
   <p>Bona tarda ${escapeHtml_(nom || 'fam\u00edlia')},</p>
@@ -636,10 +684,19 @@ function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl, ibanInvalid) 
 
   <p>${ibanLine}</p>
 
-  <p>Si us plau, reviseu les vostres dades i actualitzeu-les si cal fent clic al bot&oacute; seg&uuml;ent:</p>
+  <div style="background-color: #f5f5f5; border-radius: 8px; padding: 14px 18px; margin: 16px 0;">
+    <p style="margin: 0 0 8px 0;">
+      ${childrenHtml}
+    </p>
+    <p style="margin: 8px 0 0 0;">
+      ${addressHtml}
+    </p>
+  </div>
+
+  <p>Si teniu nous infants que hagin comen&ccedil;at l'escola o les dades han canviat, <b>actualitzeu-les si us plau</b> fent clic al bot&oacute; seg&uuml;ent:</p>
 
   <p style="text-align: center; margin: 24px 0;">
-    <a href="${editUrl}" style="background-color: #0b6; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;">
+    <a href="${editUrl}" style="background-color: #1b5e20; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;">
       <span style="color: #ffffff;">Revisar i actualitzar les meves dades</span>
     </a>
   </p>
@@ -653,4 +710,84 @@ function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl, ibanInvalid) 
     <b>AFA La Serreta</b>
   </p>
 </div>`;
+}
+
+/**
+ * Genera una previsualització HTML de tots els correus de confirmació
+ * i la desa a Google Drive. No envia res.
+ * Executar des de l'editor d'Apps Script (Executa > previewAllConfirmationEmails).
+ */
+function previewAllConfirmationEmails() {
+  var ss = SpreadsheetApp.getActive();
+  var canon = ss.getSheetByName(SHEET_CANON);
+  if (!canon) throw new Error('No trobo la pestanya: ' + SHEET_CANON);
+
+  var values = canon.getDataRange().getValues();
+  if (values.length < 2) throw new Error('No hi ha dades');
+
+  var headers = values[0].map(function(h) { return String(h).trim(); });
+  var idx = headerIndex_(headers);
+
+  ['status', 'g1_nom', 'g1_email', 'bank_iban',
+   'c1_nom', 'c1_dob', 'c2_nom', 'c2_dob', 'c3_nom', 'c3_dob', 'c4_nom', 'c4_dob',
+   'g1_adreca', 'g1_poblacio', 'g1_cp'].forEach(function(c) {
+    if (idx[c] == null) throw new Error('Falta la columna ' + c + ' a ' + SHEET_CANON);
+  });
+
+  var childSlots = [
+    { nom: 'c1_nom', dob: 'c1_dob' },
+    { nom: 'c2_nom', dob: 'c2_dob' },
+    { nom: 'c3_nom', dob: 'c3_dob' },
+    { nom: 'c4_nom', dob: 'c4_dob' }
+  ];
+
+  var parts = [];
+  var count = 0;
+
+  for (var r = 1; r < values.length; r++) {
+    var row = values[r];
+    if (String(row[idx.status]).trim() !== 'ACTIVE') continue;
+
+    var nom = (row[idx.g1_nom] || '').toString().trim();
+    var email = (row[idx.g1_email] || '').toString().trim();
+    var iban = (row[idx.bank_iban] || '').toString().trim();
+    var cleanIban = normIban_(iban);
+    var ibanInvalid = !cleanIban || cleanIban.length !== 24 || cleanIban.substring(0, 2) !== 'ES';
+
+    var children = [];
+    for (var s = 0; s < childSlots.length; s++) {
+      var childNom = (row[idx[childSlots[s].nom]] || '').toString().trim();
+      if (!childNom) continue;
+      var birthYear = extractBirthYear_(row[idx[childSlots[s].dob]]);
+      var grade = childGrade_(birthYear);
+      if (!grade) continue; // skip graduated or not-yet-in-school children
+      children.push({ nom: childNom, grade: grade });
+    }
+
+    var adr = (row[idx.g1_adreca] || '').toString().trim();
+    var cp = (row[idx.g1_cp] || '').toString().trim();
+    var pobl = (row[idx.g1_poblacio] || '').toString().trim();
+    var address = [adr, cp, pobl].filter(function(x) { return x; }).join(', ');
+
+    var html = buildConfirmationEmailHtml_(nom, iban, '#', '#', ibanInvalid, children, address);
+
+    parts.push(
+      '<div style="border: 2px solid #ccc; border-radius: 8px; margin: 20px auto; max-width: 640px; padding: 10px;">' +
+      '<p style="background: #eee; padding: 8px 12px; margin: 0 0 10px 0; border-radius: 4px; font-size: 13px;">' +
+      '<b>Fila ' + (r + 1) + '</b> &mdash; ' + escapeHtml_(email) + ' &mdash; ' + escapeHtml_(nom) +
+      '</p>' + html + '</div>'
+    );
+    count++;
+  }
+
+  if (count === 0) throw new Error('No hi ha famílies ACTIVE');
+
+  var fullHtml = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview correus AFA</title></head><body style="background:#fafafa; padding: 20px;">' +
+    '<h1 style="text-align:center; font-family: sans-serif;">Preview de ' + count + ' correus de confirmació</h1>' +
+    parts.join('\n') +
+    '</body></html>';
+
+  var file = DriveApp.createFile('preview_correus_afa.html', fullHtml, MimeType.HTML);
+  Logger.log('Preview creada: ' + file.getUrl());
+  SpreadsheetApp.getActive().toast('Preview creada a Google Drive.\n' + file.getUrl(), 'Preview ✓');
 }

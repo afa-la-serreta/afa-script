@@ -11,10 +11,10 @@ Agents must follow these rules strictly.
 | File | Purpose |
 |---|---|
 | `config.js` | Sheet name constants, webapp URL, email config, SEPA creditor details, IBANAPI config |
-| `utils.js` | Pure helpers: normalization, hashing, timestamps, graduation logic, IBAN masking, BIC lookup (sheet + IBANAPI) |
+| `utils.js` | Pure helpers: normalization, hashing, timestamps, graduation logic, grade calculation (`childGrade_`), IBAN masking, BIC lookup (sheet + IBANAPI) |
 | `parsing.js` | Form response parsing, column shift fix |
 | `dedup.js` | Union-Find clustering, canonical row merging (with overwrite support), scoring, incremental upsert |
-| `families.js` | Entry points: `onOpen`, `importAll`, `findPotentialDuplicatesAll`, `onFormSubmit`, `syncEdited`, `deactivateGraduatedFamilies`, `sendConfirmationEmails` |
+| `families.js` | Entry points: `onOpen`, `importAll`, `findPotentialDuplicatesAll`, `onFormSubmit`, `syncEdited`, `deactivateGraduatedFamilies`, `sendConfirmationEmails`, `previewAllConfirmationEmails` |
 | `webapp.js` | Web app for magic link editing and self-service deactivation (baixa voluntària) |
 | `sepa.js` | SEPA Direct Debit XML generation (pain.008.001.02 / Cuaderno 19.44), BIC resolution pre-step |
 | `sepa_dialog.html` | HTML form for SEPA params (date picker, amount, concept); calls `generateSepaWithParams()` via `google.script.run` |
@@ -57,7 +57,8 @@ families.js
   ├── onFormSubmit()                 → parsing.js, dedup.js
   ├── syncEdited()                   → parsing.js, dedup.js (time-driven trigger)
   ├── deactivateGraduatedFamilies()  → utils.js
-  └── sendConfirmationEmails()       → utils.js, config.js (quota-aware, batched, IBAN validation)
+  ├── sendConfirmationEmails()       → utils.js, config.js (quota-aware, batched, IBAN validation, children+address)
+  └── previewAllConfirmationEmails() → utils.js (generates HTML preview to Drive, no emails sent)
 
 dedup.js
   ├── clusterByStrongKeys_()    → utils.js
@@ -120,6 +121,9 @@ sepa.js
 - Stops early if quota is exhausted mid-send
 - Free Gmail: 100/day; Google Workspace: 1,500/day
 - Validates IBAN and shows warning in email if invalid (prompts family to update)
+- Shows active children with calculated grade (I3..6è) via `childGrade_(birthYear)` in `utils.js`; graduated children are excluded
+- Shows registered address; suggests updating if new children started school
+- `previewAllConfirmationEmails()` generates all emails as an HTML file to Google Drive (no sending) for testing
 
 ## Yearly workflow
 
