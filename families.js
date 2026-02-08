@@ -16,15 +16,18 @@
    ========================= */
 
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67 AFA')
+  var ui = SpreadsheetApp.getUi();
+
+  var advanced = ui.createMenu('\uD83D\uDD27 Avançat')
     .addItem('\uD83D\uDCE5 Importar totes les respostes', 'importAll')
-    .addItem('\uD83D\uDD0D Buscar possibles duplicats', 'findPotentialDuplicatesAll')
-    .addItem('\uD83D\uDD04 Sincronitzar edicions', 'syncEdited')
+    .addItem('\uD83D\uDD0D Buscar possibles duplicats', 'findPotentialDuplicatesAll');
+
+  ui.createMenu('\uD83C\uDF4E AFA')
+    .addItem('1\uFE0F\u20E3 Desactivar fam\u00edlies graduades (6\u00e8)', 'deactivateGraduatedFamilies')
+    .addItem('2\uFE0F\u20E3 Enviar correu de confirmaci\u00f3', 'sendConfirmationEmails')
+    .addItem('3\uFE0F\u20E3 Generar fitxer SEPA (rebuts)', 'generateSepaXml')
     .addSeparator()
-    .addItem('\uD83C\uDF93 Desactivar fam\u00edlies graduades (6\u00e8)', 'deactivateGraduatedFamilies')
-    .addSeparator()
-    .addItem('\u2709\uFE0F Enviar correu de confirmaci\u00f3', 'sendConfirmationEmails')
+    .addSubMenu(advanced)
     .addToUi();
 }
 
@@ -521,7 +524,11 @@ function sendConfirmationEmails() {
     // URL de baixa voluntària via webapp
     const baixaUrl = tokenEdit ? `${webappUrl}?token=${encodeURIComponent(tokenEdit)}&action=baixa` : null;
 
-    toSend.push({ email, nom, iban, editUrl, baixaUrl, sheetRow: r + 1, canonRow: r });
+    // Validar IBAN (ES ha de tenir 24 caràcters)
+    var cleanIban = normIban_(iban);
+    var ibanInvalid = !cleanIban || cleanIban.length !== 24 || cleanIban.substring(0, 2) !== 'ES';
+
+    toSend.push({ email, nom, iban, ibanInvalid, editUrl, baixaUrl, sheetRow: r + 1, canonRow: r });
   }
 
   if (toSend.length === 0) {
@@ -562,7 +569,7 @@ function sendConfirmationEmails() {
   for (let i = 0; i < maxToSend; i++) {
     const family = toSend[i];
     try {
-      const htmlBody = buildConfirmationEmailHtml_(family.nom, family.iban, family.editUrl, family.baixaUrl);
+      const htmlBody = buildConfirmationEmailHtml_(family.nom, family.iban, family.editUrl, family.baixaUrl, family.ibanInvalid);
 
       MailApp.sendEmail({
         to: family.email,
@@ -604,11 +611,16 @@ function sendConfirmationEmails() {
 /**
  * Genera l'HTML del correu de confirmació.
  */
-function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl) {
+function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl, ibanInvalid) {
   const masked = maskIban_(iban);
-  const ibanLine = masked
-    ? `El compte bancari que tenim enregistrat acaba en <b>${masked}</b>.`
-    : 'No tenim cap compte bancari enregistrat per a la vostra fam&iacute;lia.';
+  var ibanLine;
+  if (ibanInvalid) {
+    ibanLine = '&#x26a0;&#xfe0f; <b>L\'IBAN que tenim enregistrat no &eacute;s v&agrave;lid.</b> Si us plau, actualitzeu-lo amb el n&uacute;mero correcte.';
+  } else if (masked) {
+    ibanLine = `El compte bancari que tenim enregistrat acaba en <b>${masked}</b>.`;
+  } else {
+    ibanLine = 'No tenim cap compte bancari enregistrat per a la vostra fam&iacute;lia.';
+  }
 
   const baixaLine = baixaUrl
     ? `<p>Si voleu donar-vos de baixa de l'AFA, podeu fer-ho <a href="${baixaUrl}" style="color: #1a73e8;">aqu&iacute;</a>.</p>`

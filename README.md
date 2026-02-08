@@ -51,6 +51,13 @@ L'objectiu és:
   - `dedup_reasons`
   - `confirmation_sent_at` → data d'enviament del correu de confirmació
 
+### `BIC Bancs`
+- Taula de conversió codi d'entitat → BIC/SWIFT
+- Columnes: `Codi Entitat`, `BIC`, `Nom Entitat`
+- Es crea automàticament quan cal
+- Es pot editar manualment per afegir o corregir BICs
+- Nous codis es resolen automàticament via IBANAPI (si la clau API està configurada)
+
 ### `Possibles duplicats`
 - Resultat de `findPotentialDuplicatesAll()`
 - Camps a omplir manualment:
@@ -63,13 +70,15 @@ L'objectiu és:
 
 | Fitxer | Responsabilitat |
 |---|---|
-| `config.js` | Constants (noms de fulls, URL webapp, configuració email) |
-| `utils.js` | Helpers purs: normalització, hashing, timestamps, lògica de graduació, emmascarament IBAN |
+| `config.js` | Constants (noms de fulls, URL webapp, configuració email, dades creditor SEPA, IBANAPI) |
+| `utils.js` | Helpers purs: normalització, hashing, timestamps, lògica de graduació, emmascarament IBAN, BIC lookup (full + IBANAPI) |
 | `parsing.js` | Parseig de respostes del formulari, correcció de columnes (`fixColumnShift_`) |
 | `dedup.js` | Clustering Union-Find, merge a fila canònica (amb suport overwrite), scoring, upsert incremental |
 | `families.js` | Entry points: `onOpen`, `importAll`, `findPotentialDuplicatesAll`, `onFormSubmit`, `syncEdited`, `deactivateGraduatedFamilies`, `sendConfirmationEmails` |
 | `webapp.js` | Web app per edició via magic link i baixa voluntària |
+| `sepa.js` | Generació XML SEPA Direct Debit (pain.008.001.02 / Cuaderno 19.44) |
 | `index.html` | Frontend del formulari d'edició |
+| `bic_bancs_seed.csv` | Dades inicials per al full `BIC Bancs` (16 bancs extrets del XML 2024-2025) |
 
 ---
 
@@ -79,22 +88,22 @@ El menú **AFA** apareix automàticament al obrir el full de càlcul (`onOpen`):
 
 | Opció | Funció | Descripció |
 |---|---|---|
-| 📥 Importar totes les respostes | `importAll()` | Reimporta tot des de zero. Aplica graduació automàticament. |
-| 🔍 Buscar possibles duplicats | `findPotentialDuplicatesAll()` | Escriu suggeriments a `Possibles duplicats`. |
-| 🔄 Sincronitzar edicions | `syncEdited()` | Sincronitza respostes editades (també es pot executar automàticament cada 15 min). |
-| 🎓 Desactivar famílies graduades (6è) | `deactivateGraduatedFamilies()` | Desactiva famílies on tots els infants han acabat 6è. |
-| ✉️ Enviar correu de confirmació | `sendConfirmationEmails()` | Envia correus de confirmació a famílies actives (amb batching i quota). |
+| 1️⃣ Desactivar famílies graduades (6è) | `deactivateGraduatedFamilies()` | Desactiva famílies on tots els infants han acabat 6è. |
+| 2️⃣ Enviar correu de confirmació | `sendConfirmationEmails()` | Envia correus de confirmació a famílies actives (amb batching i quota). |
+| 3️⃣ Generar fitxer SEPA (rebuts) | `generateSepaXml()` | Genera XML SEPA pain.008 per al cobrament de quotes i el desa a Google Drive. |
+| 🔧 Avançat → 📥 Importar totes les respostes | `importAll()` | Reimporta tot des de zero. Aplica graduació automàticament. |
+| 🔧 Avançat → 🔍 Buscar possibles duplicats | `findPotentialDuplicatesAll()` | Escriu suggeriments a `Possibles duplicats`. |
 
 ---
 
 ## Flux normal d'ús
 
-### Import inicial
+### Import inicial (només el primer cop)
 1. Buidar `Famílies` (deixar headers)
-2. Executar **AFA → Importar totes les respostes**
-3. (Opcional) Executar **AFA → Buscar possibles duplicats**
+2. Executar **AFA → 🔧 Avançat → Importar totes les respostes**
+3. (Opcional) Executar **AFA → 🔧 Avançat → Buscar possibles duplicats**
 
-### Operació normal
+### Operació normal (automàtica)
 - Cada nova resposta del form:
   - dispara `onFormSubmit` (trigger instal·lable)
   - actualitza o crea una família
@@ -102,23 +111,44 @@ El menú **AFA** apareix automàticament al obrir el full de càlcul (`onOpen`):
   - manté traça
 - Respostes editades (via edit URL del form):
   - `syncEdited` les detecta automàticament (trigger temporitzat cada 15 min)
-  - També es pot executar manualment des del menú
 
-### Enviament de correus de confirmació
-1. Executar **AFA → ✉️ Enviar correu de confirmació**
-2. Si hi ha un enviament anterior en curs, demana: **Continuar** o **Començar de nou**
-3. Mostra la quota diària restant i envia fins al límit
-4. Marca cada família enviada a la columna `confirmation_sent_at`
-5. L'endemà, tornar a executar per enviar els pendents
+### Procés anual de cobrament de quotes
+1. **Desactivar graduats**: AFA → 1️⃣ Desactivar famílies graduades (6è)
+2. **Enviar correus**: AFA → 2️⃣ Enviar correu de confirmació
+3. **Generar SEPA**: AFA → 3️⃣ Generar fitxer SEPA (rebuts)
+
+### Enviament de correus de confirmació (pas 2)
+1. Si hi ha un enviament anterior en curs, demana: **Continuar** o **Començar de nou**
+2. Mostra la quota diària restant i envia fins al límit
+3. Marca cada família enviada a la columna `confirmation_sent_at`
+4. L'endemà, tornar a executar per enviar els pendents
 
 El correu inclou:
-- IBAN emmascarar (últims 4 dígits)
+- IBAN emmascarar (últims 4 dígits), o avís si l'IBAN és invàlid
 - Botó per editar la resposta al Google Form
 - Enllaç per donar-se de baixa (baixa voluntària via webapp)
 
-### Inici de curs (setembre)
-- Executar **AFA → 🎓 Desactivar famílies graduades (6è)**
-- O simplement reimportar: `importAll()` ja aplica la graduació
+### Generació de rebuts SEPA (pas 3)
+1. Introduir: data de cobrament, import (per defecte 35 EUR), concepte
+2. El BIC/SWIFT es resol automàticament per cada família:
+   - Primer consulta el full `BIC Bancs` (cache)
+   - Si no el troba, consulta IBANAPI (i guarda el resultat al full)
+   - Fallback: columna `bank_swift` de `Famílies`
+3. Si hi ha famílies amb problemes (IBAN invàlid, BIC desconegut, dades incompletes):
+   - Es mostra la llista completa de problemes
+   - L'usuari pot continuar sense elles o cancel·lar per corregir-les
+4. El fitxer XML (pain.008.001.02) es desa a Google Drive
+5. Es mostra un enllaç per descarregar-lo i enviar-lo al banc
+
+---
+
+## BIC/SWIFT (resolució automàtica)
+
+El BIC es deriva automàticament a partir del codi d'entitat de l'IBAN (posicions 4-7 per IBANs espanyols).
+
+- **Full `BIC Bancs`**: taula editable amb les conversions conegudes. Es pot importar `bic_bancs_seed.csv` com a punt de partida.
+- **IBANAPI**: per a codis d'entitat desconeguts, es consulta l'API automàticament (20 consultes/mes gratuïtes). Els resultats es guarden al full.
+- **Configuració**: clau API a Script Properties (`IBANAPI_KEY`). Sense clau, funciona només amb el full.
 
 ---
 

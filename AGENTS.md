@@ -10,13 +10,15 @@ Agents must follow these rules strictly.
 
 | File | Purpose |
 |---|---|
-| `config.js` | Sheet name constants, webapp URL, email config |
-| `utils.js` | Pure helpers: normalization, hashing, timestamps, graduation logic, IBAN masking |
+| `config.js` | Sheet name constants, webapp URL, email config, SEPA creditor details, IBANAPI config |
+| `utils.js` | Pure helpers: normalization, hashing, timestamps, graduation logic, IBAN masking, BIC lookup (sheet + IBANAPI) |
 | `parsing.js` | Form response parsing, column shift fix |
 | `dedup.js` | Union-Find clustering, canonical row merging (with overwrite support), scoring, incremental upsert |
 | `families.js` | Entry points: `onOpen`, `importAll`, `findPotentialDuplicatesAll`, `onFormSubmit`, `syncEdited`, `deactivateGraduatedFamilies`, `sendConfirmationEmails` |
 | `webapp.js` | Web app for magic link editing and self-service deactivation (baixa voluntària) |
+| `sepa.js` | SEPA Direct Debit XML generation (pain.008.001.02 / Cuaderno 19.44), BIC resolution pre-step |
 | `index.html` | Edit form frontend |
+| `bic_bancs_seed.csv` | Seed data for `BIC Bancs` sheet (16 banks from 2024-2025 XML) |
 
 All `.js` files share a **global namespace** (Google Apps Script). No imports/exports.
 
@@ -54,7 +56,7 @@ families.js
   ├── onFormSubmit()                 → parsing.js, dedup.js
   ├── syncEdited()                   → parsing.js, dedup.js (time-driven trigger)
   ├── deactivateGraduatedFamilies()  → utils.js
-  └── sendConfirmationEmails()       → utils.js, config.js (quota-aware, batched)
+  └── sendConfirmationEmails()       → utils.js, config.js (quota-aware, batched, IBAN validation)
 
 dedup.js
   ├── clusterByStrongKeys_()    → utils.js
@@ -65,12 +67,30 @@ dedup.js
 parsing.js
   └── parseResponseRow_()      → utils.js
 
+utils.js (BIC resolution)
+  ├── loadBicMap_()        → reads "BIC Bancs" sheet, caches per execution
+  ├── lookupBicApi_(iban)  → calls IBANAPI, returns {bic, bankName} or null
+  ├── saveBicToSheet_()    → appends row to "BIC Bancs" (creates sheet if needed)
+  └── ibanToBic_(iban)     → sheet cache → API fallback → saves to sheet
+
 webapp.js
   ├── doGet()              → edit page or baixa (deactivation) page
   ├── saveFamily()         → utils.js
   ├── deactivateFamily()   → sets inactive_reason='baixa voluntària'
   └── uses headerIndex_() from utils.js
+
+sepa.js
+  └── generateSepaXml()   → config.js, utils.js (BIC resolution + XML generation, saves to Drive)
 ```
+
+## BIC resolution
+
+- `ibanToBic_(iban)` extracts the 4-digit bank code from ES IBANs and resolves to BIC
+- Source of truth: `BIC Bancs` sheet (editable by users)
+- Auto-discovery: IBANAPI (free tier: 20 BIC lookups/month), results saved to sheet
+- API key stored in Script Properties (`IBANAPI_KEY`); works without it (sheet-only mode)
+- Bank codes with leading zeros: `loadBicMap_()` re-pads numeric codes to 4 digits (Sheets may strip zeros)
+- SEPA generation resolves BICs as pre-step; shows all problems and lets user choose to continue or abort
 
 ---
 
@@ -94,6 +114,13 @@ webapp.js
 - Shows batch start date and count of already-sent emails in the dialog
 - Stops early if quota is exhausted mid-send
 - Free Gmail: 100/day; Google Workspace: 1,500/day
+- Validates IBAN and shows warning in email if invalid (prompts family to update)
+
+## Yearly workflow
+
+1. **Desactivar famílies graduades (6è)** — deactivate families where all children finished primary school
+2. **Enviar correu de confirmació** — send data confirmation emails to active families
+3. **Generar fitxer SEPA (rebuts)** — generate direct debit XML for the bank
 
 ---
 
@@ -111,7 +138,7 @@ webapp.js
 ## Forbidden changes
 
 - Removing audit/trace columns
-- Changing sheet names without config update
+- Changing sheet names without config update (includes `BIC Bancs`)
 - Replacing deterministic dedup with probabilistic logic
 - Writing back to the form responses sheet
 - Auto-applying decisions from `Possibles duplicats`

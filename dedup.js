@@ -140,6 +140,12 @@ function mergeClusterToCanonRow_(cluster, canonRow, idxC, overwrite) {
     if (isValidDni_(d2)) setCanon_(canonRow, idxC, 'g2_dni_hash', sha256_(d2));
   }
 
+  // Auto-derivar BIC des de l'IBAN (les dades del formulari són poc fiables)
+  if (idxC.bank_swift != null && idxC.bank_iban != null) {
+    var derivedBic = ibanToBic_(canonRow[idxC.bank_iban]);
+    if (derivedBic) canonRow[idxC.bank_swift] = derivedBic;
+  }
+
   return canonRow;
 }
 
