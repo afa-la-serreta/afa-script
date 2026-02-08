@@ -470,7 +470,7 @@ function sendConfirmationEmails() {
   const headers = values[0].map(h => String(h).trim());
   const idx = headerIndex_(headers);
 
-  ['status', 'g1_nom', 'g1_email', 'bank_iban', 'source_last_timestamp', 'token_edit', 'confirmation_sent_at',
+  ['status', 'g1_nom', 'g2_nom', 'g1_email', 'g2_email', 'bank_iban', 'source_last_timestamp', 'token_edit', 'confirmation_sent_at',
    'c1_nom', 'c1_dob', 'c2_nom', 'c2_dob', 'c3_nom', 'c3_dob', 'c4_nom', 'c4_dob',
    'g1_adreca', 'g1_poblacio', 'g1_cp'].forEach(c => {
     if (idx[c] == null) throw new Error(`Falta la columna ${c} a ${SHEET_CANON}`);
@@ -496,13 +496,21 @@ function sendConfirmationEmails() {
     }
 
     const email = normEmail_(row[idx.g1_email]);
+    const email2 = normEmail_(row[idx.g2_email]);
     const nom = (row[idx.g1_nom] || '').toString().trim();
+    const nom2 = (row[idx.g2_nom] || '').toString().trim();
     const iban = (row[idx.bank_iban] || '').toString().trim();
     const tokenEdit = (row[idx.token_edit] || '').toString().trim();
 
     if (!email) {
       skipped.push(`Fila ${r + 1}: sense email`);
       continue;
+    }
+
+    // Combinar destinataris (g1 + g2 si és diferent)
+    var toAddresses = email;
+    if (email2 && email2 !== email) {
+      toAddresses = email + ',' + email2;
     }
 
     // Trobar l'edit URL: primer per timestamp, després per email com a fallback
@@ -530,7 +538,7 @@ function sendConfirmationEmails() {
     var cleanIban = normIban_(iban);
     var ibanInvalid = !cleanIban || cleanIban.length !== 24 || cleanIban.substring(0, 2) !== 'ES';
 
-    // Recollir infants actius (nom + curs calculat, excloent graduats)
+    // Recollir infants actius (nom + curs calculat, excloent graduats i placeholders)
     var children = [];
     var childSlots = [
       { nom: 'c1_nom', dob: 'c1_dob' },
@@ -540,7 +548,7 @@ function sendConfirmationEmails() {
     ];
     for (var s = 0; s < childSlots.length; s++) {
       var childNom = (row[idx[childSlots[s].nom]] || '').toString().trim();
-      if (!childNom) continue;
+      if (!childNom || /^[.\-_]+$/.test(childNom) || childNom.length < 2) continue; // skip empty/placeholder names
       var birthYear = extractBirthYear_(row[idx[childSlots[s].dob]]);
       var grade = childGrade_(birthYear);
       if (!grade) continue; // skip graduated or not-yet-in-school children
@@ -553,7 +561,7 @@ function sendConfirmationEmails() {
     var pobl = (row[idx.g1_poblacio] || '').toString().trim();
     var address = [adr, cp, pobl].filter(function(x) { return x; }).join(', ');
 
-    toSend.push({ email, nom, iban, ibanInvalid, editUrl, baixaUrl, children, address, sheetRow: r + 1, canonRow: r });
+    toSend.push({ email, toAddresses, nom, nom2, iban, ibanInvalid, editUrl, baixaUrl, children, address, sheetRow: r + 1, canonRow: r });
   }
 
   if (toSend.length === 0) {
@@ -594,10 +602,10 @@ function sendConfirmationEmails() {
   for (let i = 0; i < maxToSend; i++) {
     const family = toSend[i];
     try {
-      const htmlBody = buildConfirmationEmailHtml_(family.nom, family.iban, family.editUrl, family.baixaUrl, family.ibanInvalid, family.children, family.address);
+      const htmlBody = buildConfirmationEmailHtml_(family.nom, family.nom2, family.iban, family.editUrl, family.baixaUrl, family.ibanInvalid, family.children, family.address);
 
       MailApp.sendEmail({
-        to: family.email,
+        to: family.toAddresses,
         subject: EMAIL_SUBJECT,
         htmlBody: htmlBody,
         name: EMAIL_SENDER_NAME,
@@ -636,7 +644,7 @@ function sendConfirmationEmails() {
 /**
  * Genera l'HTML del correu de confirmació.
  */
-function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl, ibanInvalid, children, address) {
+function buildConfirmationEmailHtml_(nom, nom2, iban, editUrl, baixaUrl, ibanInvalid, children, address) {
   const masked = maskIban_(iban);
   var ibanLine;
   if (ibanInvalid) {
@@ -651,6 +659,10 @@ function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl, ibanInvalid, 
     ? `<p>Si voleu donar-vos de baixa de l'AFA, podeu fer-ho <a href="${baixaUrl}" style="color: #1a73e8;">aqu&iacute;</a>.</p>`
     : '';
 
+  // Construir salutació (un o dos tutors)
+  var greeting = escapeHtml_(nom || 'fam\u00edlia');
+  if (nom2) greeting += ' i ' + escapeHtml_(nom2);
+
   // Construir secció d'infants
   var childrenHtml = '';
   if (children && children.length > 0) {
@@ -663,7 +675,7 @@ function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl, ibanInvalid, 
     }).join('\n          ');
     childrenHtml = '<b>Infants enregistrats:</b>\n        <ul style="margin: 6px 0; padding-left: 20px;">\n          ' + items + '\n        </ul>';
   } else {
-    childrenHtml = '<b>Infants enregistrats:</b> cap';
+    childrenHtml = '<b>Infants enregistrats:</b> no en tenim const&agrave;ncia';
   }
 
   // Construir secció d'adreça
@@ -674,9 +686,17 @@ function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl, ibanInvalid, 
     addressHtml = '<b>Adre&ccedil;a:</b> no enregistrada';
   }
 
+  // Nota sobre dades d'infants (info o warning segons si en tenim)
+  var childrenNote = '';
+  if (children && children.length > 0) {
+    childrenNote = '&#x2139;&#xfe0f; Manteniu les dades dels infants actualitzades. Quan tots acabin 6&egrave; de prim&agrave;ria, la fam&iacute;lia es dona de baixa autom&agrave;ticament i deixareu de pagar la quota.';
+  } else {
+    childrenNote = '&#x26a0;&#xfe0f; No tenim les dades dels vostres infants. Necessitem el nom i la data de naixement per poder donar de baixa la fam&iacute;lia autom&agrave;ticament quan acabin 6&egrave; de prim&agrave;ria.';
+  }
+
   return `
 <div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
-  <p>Bona tarda ${escapeHtml_(nom || 'fam\u00edlia')},</p>
+  <p>Bona tarda ${greeting},</p>
 
   <p>Encantats de saludar-vos.</p>
 
@@ -693,13 +713,15 @@ function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl, ibanInvalid, 
     </p>
   </div>
 
-  <p>Si teniu nous infants que hagin comen&ccedil;at l'escola o les dades han canviat, <b>actualitzeu-les si us plau</b> fent clic al bot&oacute; seg&uuml;ent:</p>
+  <p>Si les dades no s&oacute;n correctes o teniu nous infants que hagin comen&ccedil;at l'escola, actualitzeu-les fent clic al bot&oacute; seg&uuml;ent:</p>
 
   <p style="text-align: center; margin: 24px 0;">
     <a href="${editUrl}" style="background-color: #1b5e20; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;">
       <span style="color: #ffffff;">Revisar i actualitzar les meves dades</span>
     </a>
   </p>
+
+  <p style="font-size: 13px; color: #666;">${childrenNote}</p>
 
   ${baixaLine}
 
@@ -728,7 +750,7 @@ function previewAllConfirmationEmails() {
   var headers = values[0].map(function(h) { return String(h).trim(); });
   var idx = headerIndex_(headers);
 
-  ['status', 'g1_nom', 'g1_email', 'bank_iban',
+  ['status', 'g1_nom', 'g2_nom', 'g1_email', 'g2_email', 'bank_iban',
    'c1_nom', 'c1_dob', 'c2_nom', 'c2_dob', 'c3_nom', 'c3_dob', 'c4_nom', 'c4_dob',
    'g1_adreca', 'g1_poblacio', 'g1_cp'].forEach(function(c) {
     if (idx[c] == null) throw new Error('Falta la columna ' + c + ' a ' + SHEET_CANON);
@@ -749,7 +771,9 @@ function previewAllConfirmationEmails() {
     if (String(row[idx.status]).trim() !== 'ACTIVE') continue;
 
     var nom = (row[idx.g1_nom] || '').toString().trim();
+    var nom2 = (row[idx.g2_nom] || '').toString().trim();
     var email = (row[idx.g1_email] || '').toString().trim();
+    var email2 = normEmail_(row[idx.g2_email]);
     var iban = (row[idx.bank_iban] || '').toString().trim();
     var cleanIban = normIban_(iban);
     var ibanInvalid = !cleanIban || cleanIban.length !== 24 || cleanIban.substring(0, 2) !== 'ES';
@@ -757,7 +781,7 @@ function previewAllConfirmationEmails() {
     var children = [];
     for (var s = 0; s < childSlots.length; s++) {
       var childNom = (row[idx[childSlots[s].nom]] || '').toString().trim();
-      if (!childNom) continue;
+      if (!childNom || /^[.\-_]+$/.test(childNom) || childNom.length < 2) continue; // skip empty/placeholder names
       var birthYear = extractBirthYear_(row[idx[childSlots[s].dob]]);
       var grade = childGrade_(birthYear);
       if (!grade) continue; // skip graduated or not-yet-in-school children
@@ -769,12 +793,15 @@ function previewAllConfirmationEmails() {
     var pobl = (row[idx.g1_poblacio] || '').toString().trim();
     var address = [adr, cp, pobl].filter(function(x) { return x; }).join(', ');
 
-    var html = buildConfirmationEmailHtml_(nom, iban, '#', '#', ibanInvalid, children, address);
+    var html = buildConfirmationEmailHtml_(nom, nom2, iban, '#', '#', ibanInvalid, children, address);
+
+    var emailDisplay = escapeHtml_(email);
+    if (email2 && email2 !== normEmail_(email)) emailDisplay += ', ' + escapeHtml_(email2);
 
     parts.push(
       '<div style="border: 2px solid #ccc; border-radius: 8px; margin: 20px auto; max-width: 640px; padding: 10px;">' +
       '<p style="background: #eee; padding: 8px 12px; margin: 0 0 10px 0; border-radius: 4px; font-size: 13px;">' +
-      '<b>Fila ' + (r + 1) + '</b> &mdash; ' + escapeHtml_(email) + ' &mdash; ' + escapeHtml_(nom) +
+      '<b>Fila ' + (r + 1) + '</b> &mdash; ' + emailDisplay + ' &mdash; ' + escapeHtml_(nom) +
       '</p>' + html + '</div>'
     );
     count++;
