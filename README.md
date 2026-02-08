@@ -177,12 +177,39 @@ El BIC es deriva automàticament a partir del codi d'entitat de l'IBAN (posicion
 
 ---
 
-## Versionat
+## Versionat i desplegament
 
-Aquest projecte està versionat amb GitHub i sincronitzat amb Apps Script via `clasp`.
+Aquest projecte està versionat amb **GitHub** i sincronitzat amb Apps Script via [`clasp`](https://github.com/google/clasp).
+
+**⚠️ No modifiqueu el codi directament a l'editor d'Apps Script!**
+Feu els canvis al repositori i desplegeu amb `clasp push`.
+
+### Configuració de `clasp` (per a nous col·laboradors)
+
+```bash
+npm install -g @google/clasp
+clasp login          # autenticar-se amb un compte amb accés al projecte
+clasp clone <scriptId>   # o simplement usar el .clasp.json existent
+clasp push           # desplegar canvis a Apps Script
+```
 
 No versionar:
 - `.clasp.json` (conté IDs del projecte)
+
+---
+
+## Manteniment i accés
+
+| Recurs | Detalls |
+|---|---|
+| **Repositori GitHub** | [github.com/afa-la-serreta/afa-script](https://github.com/afa-la-serreta/afa-script) |
+| **Propietari de l'organització GitHub** | El compte de correu oficial de l'AFA |
+| **IBANAPI** | Registrat amb el mateix correu de l'AFA — si cal accedir, useu "Forgot password" a [ibanapi.com](https://ibanapi.com) |
+
+Si canvia la junta de l'AFA:
+1. Afegiu el nou responsable com a **Owner** de l'organització GitHub (`afa-la-serreta`)
+2. Doneu-li accés al projecte d'Apps Script (des de Google Drive, compartint el spreadsheet i/o el script)
+3. Opcionalment, transferiu la propietat del Google Apps Script project
 
 ---
 
