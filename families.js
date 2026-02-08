@@ -372,6 +372,50 @@ function sendConfirmationEmails() {
   if (!canon) throw new Error(`No trobo la pestanya: ${SHEET_CANON}`);
   if (!respSheet) throw new Error(`No trobo la pestanya: ${SHEET_RESPONSES}`);
 
+  // Detectar enviament en curs
+  const allValues = canon.getDataRange().getValues();
+  const allHeaders = allValues[0].map(function(h) { return String(h).trim(); });
+  const idxPre = headerIndex_(allHeaders);
+
+  if (idxPre.confirmation_sent_at == null) {
+    throw new Error('Falta la columna confirmation_sent_at a ' + SHEET_CANON);
+  }
+
+  var earliestSent = null;
+  var sentCount = 0;
+  for (var r = 1; r < allValues.length; r++) {
+    var v = allValues[r][idxPre.confirmation_sent_at];
+    if (v) {
+      sentCount++;
+      var d = (v instanceof Date) ? v : new Date(v);
+      if (!isNaN(d.getTime()) && (earliestSent === null || d < earliestSent)) {
+        earliestSent = d;
+      }
+    }
+  }
+
+  if (sentCount > 0 && earliestSent) {
+    var dateStr = earliestSent.toLocaleDateString('ca-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+    var resp = ui.alert(
+      'Enviament en curs',
+      'Hi ha un enviament iniciat el ' + dateStr + ' amb ' + sentCount + ' correus ja enviats.\n\n' +
+      'S\u00ed = Continuar enviant els pendents\n' +
+      'No = Comen\u00e7ar de nou (esborra les marques anteriors)',
+      ui.ButtonSet.YES_NO_CANCEL
+    );
+    if (resp === ui.Button.CANCEL) {
+      ss.toast('Enviament cancel\u00b7lat.', 'Cancel\u00b7lat');
+      return;
+    }
+    if (resp === ui.Button.NO) {
+      // Esborrar la columna confirmation_sent_at
+      var col = idxPre.confirmation_sent_at + 1;
+      canon.getRange(2, col, allValues.length - 1, 1).clearContent();
+      ss.toast('Marques esborrades. Preparant nou enviament...', 'AFA');
+    }
+    // YES → continuar amb les marques existents
+  }
+
   ss.toast('Preparant enviament...', 'AFA');
 
   // Obtenir el form vinculat
@@ -416,14 +460,14 @@ function sendConfirmationEmails() {
     }
   }
 
-  // Llegir famílies
+  // Llegir famílies (re-llegir per si s'ha esborrat la columna)
   const values = canon.getDataRange().getValues();
   if (values.length < 2) return;
 
   const headers = values[0].map(h => String(h).trim());
   const idx = headerIndex_(headers);
 
-  ['status', 'g1_nom', 'g1_email', 'bank_iban', 'source_last_timestamp', 'token_edit'].forEach(c => {
+  ['status', 'g1_nom', 'g1_email', 'bank_iban', 'source_last_timestamp', 'token_edit', 'confirmation_sent_at'].forEach(c => {
     if (idx[c] == null) throw new Error(`Falta la columna ${c} a ${SHEET_CANON}`);
   });
 
@@ -433,10 +477,18 @@ function sendConfirmationEmails() {
   // Preparar llista de destinataris
   const toSend = [];
   const skipped = [];
+  let alreadySent = 0;
 
   for (let r = 1; r < values.length; r++) {
     const row = values[r];
     if (String(row[idx.status]).trim() !== 'ACTIVE') continue;
+
+    // Saltar famílies ja enviades
+    const sentAt = row[idx.confirmation_sent_at];
+    if (sentAt) {
+      alreadySent++;
+      continue;
+    }
 
     const email = normEmail_(row[idx.g1_email]);
     const nom = (row[idx.g1_nom] || '').toString().trim();
@@ -469,34 +521,46 @@ function sendConfirmationEmails() {
     // URL de baixa voluntària via webapp
     const baixaUrl = tokenEdit ? `${webappUrl}?token=${encodeURIComponent(tokenEdit)}&action=baixa` : null;
 
-    toSend.push({ email, nom, iban, editUrl, baixaUrl, sheetRow: r + 1 });
+    toSend.push({ email, nom, iban, editUrl, baixaUrl, sheetRow: r + 1, canonRow: r });
   }
 
   if (toSend.length === 0) {
-    ui.alert('Cap correu a enviar',
-      'No s\'han trobat famílies actives amb email i URL d\'edició vàlids.' +
-      (skipped.length ? '\n\nSaltades:\n' + skipped.join('\n') : ''),
+    const parts = [];
+    if (alreadySent) parts.push(`${alreadySent} ja enviades anteriorment`);
+    if (skipped.length) parts.push(`${skipped.length} saltades (sense email o URL)`);
+    ui.alert('Cap correu pendent',
+      parts.length ? parts.join('\n') : 'No hi ha fam\u00edlies actives pendents.',
       ui.ButtonSet.OK);
     return;
   }
 
+  // Comprovar quota restant
+  const remaining = MailApp.getRemainingDailyQuota();
+
   // Confirmació
-  const msg = `S'enviaran ${toSend.length} correus a famílies actives.` +
-    (skipped.length ? `\n\n${skipped.length} famílies saltades (sense email o URL).` : '') +
+  const pendingMsg = `${toSend.length} correus pendents d'enviar.` +
+    (alreadySent ? `\n${alreadySent} ja enviats anteriorment.` : '') +
+    (skipped.length ? `\n${skipped.length} saltades (sense email o URL).` : '') +
+    `\n\nQuota di\u00e0ria restant: ${remaining} correus.` +
+    (toSend.length > remaining
+      ? `\n\u26a0\ufe0f Nom\u00e9s s'enviaran ${remaining} avui. Torneu a executar dem\u00e0 per continuar.`
+      : '') +
     '\n\nVols continuar?';
 
-  const answer = ui.alert('Confirmar enviament', msg, ui.ButtonSet.YES_NO);
+  const answer = ui.alert('Confirmar enviament', pendingMsg, ui.ButtonSet.YES_NO);
   if (answer !== ui.Button.YES) {
-    ss.toast('Enviament cancel·lat.', 'Cancel·lat');
+    ss.toast('Enviament cancel\u00b7lat.', 'Cancel\u00b7lat');
     return;
   }
 
-  // Enviar correus
+  // Enviar correus (respectant la quota)
+  const maxToSend = Math.min(toSend.length, remaining);
   let sent = 0;
   let errors = 0;
-  const total = toSend.length;
+  const now = new Date();
 
-  for (const family of toSend) {
+  for (let i = 0; i < maxToSend; i++) {
+    const family = toSend[i];
     try {
       const htmlBody = buildConfirmationEmailHtml_(family.nom, family.iban, family.editUrl, family.baixaUrl);
 
@@ -508,22 +572,33 @@ function sendConfirmationEmails() {
       });
 
       sent++;
-      if (sent % 10 === 0 || sent === total) {
-        ss.toast(`Enviant ${sent} / ${total}...`, 'AFA');
+
+      // Marcar com a enviat
+      canon.getRange(family.sheetRow, idx.confirmation_sent_at + 1).setValue(now);
+
+      if (sent % 10 === 0 || sent === maxToSend) {
+        ss.toast(`Enviant ${sent} / ${maxToSend}...`, 'AFA');
       }
       Logger.log(`\u2713 Enviat a: ${family.email} (fila ${family.sheetRow})`);
     } catch (err) {
       errors++;
       Logger.log(`\u2717 Error enviant a ${family.email}: ${err.message}`);
+      // Si l'error és de quota, aturem
+      if (err.message && err.message.indexOf('quota') >= 0) {
+        Logger.log('Quota exhaurida, aturant enviament.');
+        break;
+      }
     }
   }
 
+  const pendingRemaining = toSend.length - sent;
   const result = `${sent} correus enviats` +
     (errors ? `, ${errors} errors` : '') +
+    (pendingRemaining > 0 ? `, ${pendingRemaining} pendents per dem\u00e0` : '') +
     (skipped.length ? `, ${skipped.length} saltades` : '');
 
   Logger.log(`sendConfirmationEmails: ${result}`);
-  ss.toast(result, 'Enviament completat ✓');
+  ss.toast(result, 'Enviament completat \u2713');
 }
 
 /**

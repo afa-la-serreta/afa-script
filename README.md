@@ -9,6 +9,8 @@ L'objectiu és:
 - mantenir **traçabilitat completa** de les respostes originals
 - permetre edició posterior via *magic link*
 - desactivar automàticament famílies que ja han acabat l'escola
+- enviar correus de confirmació de dades (amb batching i quota)
+- permetre baixa voluntària via webapp
 
 ---
 
@@ -47,6 +49,7 @@ L'objectiu és:
   - `source_rows` → files del form que s'han fusionat
   - `source_count`
   - `dedup_reasons`
+  - `confirmation_sent_at` → data d'enviament del correu de confirmació
 
 ### `Possibles duplicats`
 - Resultat de `findPotentialDuplicatesAll()`
@@ -60,12 +63,12 @@ L'objectiu és:
 
 | Fitxer | Responsabilitat |
 |---|---|
-| `config.js` | Constants (noms de fulls) |
-| `utils.js` | Helpers purs: normalització, hashing, timestamps, lògica de graduació, `applyGraduationStatus_` |
+| `config.js` | Constants (noms de fulls, URL webapp, configuració email) |
+| `utils.js` | Helpers purs: normalització, hashing, timestamps, lògica de graduació, emmascarament IBAN |
 | `parsing.js` | Parseig de respostes del formulari, correcció de columnes (`fixColumnShift_`) |
-| `dedup.js` | Clustering Union-Find, merge a fila canònica, scoring, upsert incremental |
-| `families.js` | Entry points: `onOpen`, `importAll`, `findPotentialDuplicatesAll`, `onFormSubmit`, `deactivateGraduatedFamilies` |
-| `webapp.js` | Web app per edició via magic link |
+| `dedup.js` | Clustering Union-Find, merge a fila canònica (amb suport overwrite), scoring, upsert incremental |
+| `families.js` | Entry points: `onOpen`, `importAll`, `findPotentialDuplicatesAll`, `onFormSubmit`, `syncEdited`, `deactivateGraduatedFamilies`, `sendConfirmationEmails` |
+| `webapp.js` | Web app per edició via magic link i baixa voluntària |
 | `index.html` | Frontend del formulari d'edició |
 
 ---
@@ -76,9 +79,11 @@ El menú **AFA** apareix automàticament al obrir el full de càlcul (`onOpen`):
 
 | Opció | Funció | Descripció |
 |---|---|---|
-| Importar totes les respostes | `importAll()` | Reimporta tot des de zero. Aplica graduació automàticament. |
-| Buscar possibles duplicats | `findPotentialDuplicatesAll()` | Escriu suggeriments a `Possibles duplicats`. |
-| Desactivar famílies graduades (6è) | `deactivateGraduatedFamilies()` | Desactiva famílies on tots els infants han acabat 6è. |
+| 📥 Importar totes les respostes | `importAll()` | Reimporta tot des de zero. Aplica graduació automàticament. |
+| 🔍 Buscar possibles duplicats | `findPotentialDuplicatesAll()` | Escriu suggeriments a `Possibles duplicats`. |
+| 🔄 Sincronitzar edicions | `syncEdited()` | Sincronitza respostes editades (també es pot executar automàticament cada 15 min). |
+| 🎓 Desactivar famílies graduades (6è) | `deactivateGraduatedFamilies()` | Desactiva famílies on tots els infants han acabat 6è. |
+| ✉️ Enviar correu de confirmació | `sendConfirmationEmails()` | Envia correus de confirmació a famílies actives (amb batching i quota). |
 
 ---
 
@@ -95,9 +100,24 @@ El menú **AFA** apareix automàticament al obrir el full de càlcul (`onOpen`):
   - actualitza o crea una família
   - aplica graduació automàticament
   - manté traça
+- Respostes editades (via edit URL del form):
+  - `syncEdited` les detecta automàticament (trigger temporitzat cada 15 min)
+  - També es pot executar manualment des del menú
+
+### Enviament de correus de confirmació
+1. Executar **AFA → ✉️ Enviar correu de confirmació**
+2. Si hi ha un enviament anterior en curs, demana: **Continuar** o **Començar de nou**
+3. Mostra la quota diària restant i envia fins al límit
+4. Marca cada família enviada a la columna `confirmation_sent_at`
+5. L'endemà, tornar a executar per enviar els pendents
+
+El correu inclou:
+- IBAN emmascarar (últims 4 dígits)
+- Botó per editar la resposta al Google Form
+- Enllaç per donar-se de baixa (baixa voluntària via webapp)
 
 ### Inici de curs (setembre)
-- Executar **AFA → Desactivar famílies graduades (6è)**
+- Executar **AFA → 🎓 Desactivar famílies graduades (6è)**
 - O simplement reimportar: `importAll()` ja aplica la graduació
 
 ---
