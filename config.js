@@ -1,4 +1,16 @@
-// config.gs (o a dalt de Code.gs)
+// ============================================================================
+// AFA La Serreta — Gestió de socis
+//
+// Documentació completa i codi font:
+//   https://github.com/afa-la-serreta/afa-script
+//
+// Llegeix el README.md per entendre l'arquitectura, el flux d'ús,
+// la lògica de deduplicació, graduació, SEPA i enviament de correus.
+//
+// ⚠️  NO modifiqueu el codi directament a l'editor d'Apps Script!
+//     El projecte està versionat amb Git i sincronitzat amb `clasp`.
+//     Feu els canvis al repositori i desplegeu amb `clasp push`.
+// ============================================================================
 const SHEET_RESPONSES = 'Respuestas de formulario 1';
 const SHEET_CANON = 'Famílies';
 const SHEET_POTENTIAL = 'Possibles duplicats';

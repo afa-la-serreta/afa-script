@@ -1,3 +1,4 @@
+// Codi font i docs: https://github.com/afa-la-serreta/afa-script — No editeu aquí, useu clasp push.
 /****************
  * webapp.gs
  * Web App per a famílies (magic link)
