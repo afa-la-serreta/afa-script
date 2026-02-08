@@ -17,6 +17,7 @@ Agents must follow these rules strictly.
 | `families.js` | Entry points: `onOpen`, `importAll`, `findPotentialDuplicatesAll`, `onFormSubmit`, `syncEdited`, `deactivateGraduatedFamilies`, `sendConfirmationEmails` |
 | `webapp.js` | Web app for magic link editing and self-service deactivation (baixa voluntària) |
 | `sepa.js` | SEPA Direct Debit XML generation (pain.008.001.02 / Cuaderno 19.44), BIC resolution pre-step |
+| `sepa_dialog.html` | HTML form for SEPA params (date picker, amount, concept); calls `generateSepaWithParams()` via `google.script.run` |
 | `index.html` | Edit form frontend |
 | `bic_bancs_seed.csv` | Seed data for `BIC Bancs` sheet (16 banks from 2024-2025 XML) |
 
@@ -80,7 +81,9 @@ webapp.js
   └── uses headerIndex_() from utils.js
 
 sepa.js
-  └── generateSepaXml()   → config.js, utils.js (BIC resolution + XML generation, saves to Drive)
+  ├── generateSepaXml()        → shows sepa_dialog.html modal with defaults
+  └── generateSepaWithParams() → config.js, utils.js (BIC resolution + XML generation, saves to Drive)
+      (public name — called from HTML via google.script.run, cannot end in _)
 ```
 
 ## BIC resolution
@@ -91,6 +94,8 @@ sepa.js
 - API key stored in Script Properties (`IBANAPI_KEY`); works without it (sheet-only mode)
 - Bank codes with leading zeros: `loadBicMap_()` re-pads numeric codes to 4 digits (Sheets may strip zeros)
 - SEPA generation resolves BICs as pre-step; shows all problems and lets user choose to continue or abort
+- Debtor address uses structured XML fields (`StrtNm`, `PstCd`, `TwnNm`, `Ctry`) — NOT `AdrLine` (Sabadell rejects unstructured addresses)
+- Debtor name: `cognoms + nom` (full name); no `<Id>` block (we don't have valid DNIs)
 
 ---
 

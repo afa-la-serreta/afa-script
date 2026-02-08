@@ -10,21 +10,71 @@
  ****************/
 
 /**
- * Entry point: genera el fitxer SEPA XML i el desa a Google Drive.
+ * Entry point: mostra el formulari HTML per configurar els paràmetres SEPA.
  * Es crida des del menú AFA.
  */
 function generateSepaXml() {
+  var ui = SpreadsheetApp.getUi();
+
+  // Calcular valors per defecte
+  var defaultDate = nextBusinessDay_(new Date(), 2);
+  var defaultDateStr = formatDate_(defaultDate);
+
+  var today = new Date();
+  var month = today.getMonth() + 1;
+  var year = today.getFullYear();
+  var cursStart = month >= 9 ? year : year - 1;
+  var defaultRemittance = 'QUOTA AFA CURS ' + cursStart + '-' + (cursStart + 1);
+
+  // Crear dialog HTML amb valors per defecte injectats
+  var template = HtmlService.createTemplateFromFile('sepa_dialog');
+  template.defaultDate = defaultDateStr;
+  template.defaultAmount = '35.00';
+  template.defaultRemittance = defaultRemittance;
+
+  var html = template.evaluate()
+    .setWidth(420)
+    .setHeight(340);
+
+  ui.showModalDialog(html, '\uD83C\uDF4E Generar fitxer SEPA');
+}
+
+/**
+ * Genera el fitxer SEPA XML amb els paràmetres del formulari HTML.
+ * Es crida des de sepa_dialog.html via google.script.run.
+ * (No pot acabar en _ perquè google.script.run no pot cridar funcions privades.)
+ */
+function generateSepaWithParams(collectionDate, amountStr, remittance) {
   var ss = SpreadsheetApp.getActive();
   var ui = SpreadsheetApp.getUi();
   var canon = ss.getSheetByName(SHEET_CANON);
 
   if (!canon) throw new Error('No trobo la pestanya: ' + SHEET_CANON);
 
-  // Demanar paràmetres a l'usuari
-  var params = askSepaParams_(ui);
-  if (!params) return; // cancel·lat
+  // Validar paràmetres
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(collectionDate)) {
+    throw new Error('Format de data inv\u00e0lid. Usa YYYY-MM-DD.');
+  }
+  var amount = parseFloat(String(amountStr).replace(',', '.'));
+  if (isNaN(amount) || amount <= 0) {
+    throw new Error('Import inv\u00e0lid.');
+  }
+  remittance = String(remittance || '').trim();
+  if (!remittance) throw new Error('Cal indicar el concepte.');
 
-  ss.toast('Generant fitxer SEPA...', 'AFA');
+  // Derivar curs escolar
+  var pYear = parseInt(collectionDate.substring(0, 4), 10);
+  var pMonth = parseInt(collectionDate.substring(5, 7), 10);
+  var cursStart = pMonth >= 9 ? pYear : pYear - 1;
+
+  var params = {
+    collectionDate: collectionDate,
+    amount: amount,
+    remittance: remittance,
+    year: cursStart
+  };
+
+  ss.toast('Resolent BICs des de l\'IBAN...', 'AFA');
 
   // Llegir famílies
   var values = canon.getDataRange().getValues();
@@ -46,8 +96,6 @@ function generateSepaXml() {
   var families = [];
   var skipped = [];
   var missingBic = [];
-
-  ss.toast('Resolent BICs des de l\'IBAN...', 'AFA');
 
   for (var r = 1; r < values.length; r++) {
     var row = values[r];
@@ -93,17 +141,14 @@ function generateSepaXml() {
     }
     if (!dtSign) dtSign = '2009-10-31'; // fallback
 
-    // Adreça completa
-    var addrLine = adreca;
-    if (cp) addrLine += ' ' + cp;
-    if (poblacio) addrLine += ' ' + poblacio + ' (BARCELONA)';
-
     families.push({
       nom: nom,
       cognoms: cognoms,
       iban: iban,
       swift: swift,
-      addrLine: addrLine,
+      adreca: adreca,
+      cp: cp,
+      poblacio: poblacio,
       dtOfSgntr: dtSign
     });
   }
@@ -123,8 +168,8 @@ function generateSepaXml() {
   var allProblems = skipped.concat(missingBic);
 
   if (families.length === 0) {
-    ui.alert('Cap família vàlida',
-      'No s\'han trobat famílies actives amb dades vàlides.' +
+    ui.alert('Cap fam\u00edlia v\u00e0lida',
+      'No s\'han trobat fam\u00edlies actives amb dades v\u00e0lides.' +
       (allProblems.length ? '\n\nProblemes:\n' + allProblems.join('\n') : ''),
       ui.ButtonSet.OK);
     return;
@@ -132,13 +177,13 @@ function generateSepaXml() {
 
   // Si hi ha problemes, deixar que l'usuari decideixi
   if (allProblems.length > 0) {
-    var problemMsg = families.length + ' famílies vàlides, ' + allProblems.length + ' amb problemes:\n\n' +
+    var problemMsg = families.length + ' fam\u00edlies v\u00e0lides, ' + allProblems.length + ' amb problemes:\n\n' +
       allProblems.join('\n') +
       (missingBic.length ? '\n\n(Per a BICs desconeguts, afegiu-los al full "' + SHEET_BIC + '")' : '') +
-      '\n\nVoleu continuar sense les famílies amb problemes?';
-    var answer = ui.alert('Famílies amb problemes', problemMsg, ui.ButtonSet.YES_NO);
+      '\n\nVoleu continuar sense les fam\u00edlies amb problemes?';
+    var answer = ui.alert('Fam\u00edlies amb problemes', problemMsg, ui.ButtonSet.YES_NO);
     if (answer !== ui.Button.YES) {
-      ss.toast('Generació cancel·lada.', 'Cancel·lat');
+      ss.toast('Generaci\u00f3 cancel\u00b7lada.', 'Cancel\u00b7lat');
       return;
     }
   }
@@ -169,7 +214,7 @@ function generateSepaXml() {
   Logger.log('SEPA XML generat: ' + fileUrl);
 
   // Mostrar enllaç
-  var html = HtmlService.createHtmlOutput(
+  var resultHtml = HtmlService.createHtmlOutput(
     '<p>Fitxer generat correctament:</p>' +
     '<p><b>' + escapeXml_(fileName) + '</b></p>' +
     '<p>' + families.length + ' rebuts, ' + (families.length * params.amount).toFixed(2) + ' \u20ac</p>' +
@@ -177,67 +222,7 @@ function generateSepaXml() {
     (skipped.length ? '<p style="color:#999;">' + skipped.length + ' fam\u00edlies saltades.</p>' : '')
   ).setWidth(400).setHeight(250);
 
-  ui.showModalDialog(html, 'SEPA generat \u2713');
-}
-
-/* =========================
-   Dialog per demanar paràmetres
-   ========================= */
-
-/**
- * Demana la data de cobrament, import i concepte.
- * Retorna null si l'usuari cancel·la.
- */
-function askSepaParams_(ui) {
-  // Data de cobrament
-  var today = new Date();
-  var defaultDate = new Date(today.getTime() + 2 * 24 * 60 * 60 * 1000);
-  var defaultDateStr = formatDate_(defaultDate);
-
-  var respDate = ui.prompt('Data de cobrament',
-    'Data de cobrament (YYYY-MM-DD):\n(m\u00ednim 2 dies h\u00e0bils des d\'avui)',
-    ui.ButtonSet.OK_CANCEL);
-  if (respDate.getSelectedButton() !== ui.Button.OK) return null;
-  var collectionDate = respDate.getResponseText().trim() || defaultDateStr;
-
-  // Validar format de data
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(collectionDate)) {
-    ui.alert('Error', 'Format de data inv\u00e0lid. Usa YYYY-MM-DD.', ui.ButtonSet.OK);
-    return null;
-  }
-
-  // Import
-  var respAmount = ui.prompt('Import per fam\u00edlia',
-    'Import en euros (per defecte 35.00):',
-    ui.ButtonSet.OK_CANCEL);
-  if (respAmount.getSelectedButton() !== ui.Button.OK) return null;
-  var amountStr = respAmount.getResponseText().trim() || '35.00';
-  var amount = parseFloat(amountStr.replace(',', '.'));
-  if (isNaN(amount) || amount <= 0) {
-    ui.alert('Error', 'Import inv\u00e0lid.', ui.ButtonSet.OK);
-    return null;
-  }
-
-  // Concepte
-  var year = parseInt(collectionDate.substring(0, 4), 10);
-  var month = parseInt(collectionDate.substring(5, 7), 10);
-  // Si estem entre setembre i desembre, el curs és year/year+1
-  // Si estem entre gener i agost, el curs és year-1/year
-  var cursStart = month >= 9 ? year : year - 1;
-  var defaultRemittance = 'QUOTA AFA CURS ' + cursStart + '-' + (cursStart + 1);
-
-  var respRem = ui.prompt('Concepte del rebut',
-    'Text del concepte (per defecte: ' + defaultRemittance + '):',
-    ui.ButtonSet.OK_CANCEL);
-  if (respRem.getSelectedButton() !== ui.Button.OK) return null;
-  var remittance = respRem.getResponseText().trim() || defaultRemittance;
-
-  return {
-    collectionDate: collectionDate,
-    amount: amount,
-    remittance: remittance,
-    year: cursStart
-  };
+  ui.showModalDialog(resultHtml, 'SEPA generat \u2713');
 }
 
 /* =========================
@@ -303,8 +288,10 @@ function buildSepaXml_(families, params) {
   lines.push('\t\t\t<Cdtr>');
   lines.push('\t\t\t\t<Nm>' + escapeXml_(SEPA_CREDITOR_NAME) + '</Nm>');
   lines.push('\t\t\t\t<PstlAdr>');
+  lines.push('\t\t\t\t\t<StrtNm>' + escapeXml_(SEPA_CREDITOR_STREET) + '</StrtNm>');
+  lines.push('\t\t\t\t\t<PstCd>' + escapeXml_(SEPA_CREDITOR_POSTCODE) + '</PstCd>');
+  lines.push('\t\t\t\t\t<TwnNm>' + escapeXml_(SEPA_CREDITOR_TOWN) + '</TwnNm>');
   lines.push('\t\t\t\t\t<Ctry>' + SEPA_CREDITOR_COUNTRY + '</Ctry>');
-  lines.push('\t\t\t\t\t<AdrLine>' + escapeXml_(SEPA_CREDITOR_ADDRESS) + '</AdrLine>');
   lines.push('\t\t\t\t</PstlAdr>');
   lines.push('\t\t\t</Cdtr>');
 
@@ -344,13 +331,15 @@ function buildSepaXml_(families, params) {
     var fam = families[i];
     var seq = padZero_(i + 1, 3);
     var mandateId = params.year + seq;
-    var endToEndId = mandateId + '/' + escapeXml_(fam.nom || 'N') + '/' + dateCompact;
+    // EndToEndId: max 35 chars, SEPA charset (a-zA-Z0-9/-?:().,'+space)
+    var rawE2E = mandateId + '/' + (fam.cognoms || 'N') + '/' + dateCompact;
+    var endToEndId = rawE2E.replace(/[^a-zA-Z0-9\/\-?:().,'+\s]/g, '').substring(0, 35);
 
     lines.push('\t\t\t<DrctDbtTxInf>');
 
     // Payment Id
     lines.push('\t\t\t\t<PmtId>');
-    lines.push('\t\t\t\t\t<EndToEndId>' + endToEndId + '</EndToEndId>');
+    lines.push('\t\t\t\t\t<EndToEndId>' + escapeXml_(endToEndId) + '</EndToEndId>');
     lines.push('\t\t\t\t</PmtId>');
 
     // Amount
@@ -371,21 +360,29 @@ function buildSepaXml_(families, params) {
     lines.push('\t\t\t\t\t</FinInstnId>');
     lines.push('\t\t\t\t</DbtrAgt>');
 
-    // Debtor
+    // Debtor — full name (cognoms + nom), structured address, no Id block (no DNI data)
+    var debtorName = fam.cognoms;
+    if (fam.nom) debtorName += ' ' + fam.nom;
+    // Nm max 70 chars (pain.008.001.02)
+    if (debtorName.length > 70) debtorName = debtorName.substring(0, 70);
+
     lines.push('\t\t\t\t<Dbtr>');
-    lines.push('\t\t\t\t\t<Nm>' + escapeXml_(fam.cognoms) + '</Nm>');
+    lines.push('\t\t\t\t\t<Nm>' + escapeXml_(debtorName) + '</Nm>');
     lines.push('\t\t\t\t\t<PstlAdr>');
+    if (fam.adreca) {
+      // StrtNm max 70 chars
+      lines.push('\t\t\t\t\t\t<StrtNm>' + escapeXml_(fam.adreca.substring(0, 70)) + '</StrtNm>');
+    }
+    if (fam.cp) {
+      // PstCd max 16 chars
+      lines.push('\t\t\t\t\t\t<PstCd>' + escapeXml_(fam.cp.substring(0, 16)) + '</PstCd>');
+    }
+    if (fam.poblacio) {
+      // TwnNm max 35 chars
+      lines.push('\t\t\t\t\t\t<TwnNm>' + escapeXml_(fam.poblacio.substring(0, 35)) + '</TwnNm>');
+    }
     lines.push('\t\t\t\t\t\t<Ctry>ES</Ctry>');
-    lines.push('\t\t\t\t\t\t<AdrLine>' + escapeXml_(fam.addrLine) + '</AdrLine>');
     lines.push('\t\t\t\t\t</PstlAdr>');
-    lines.push('\t\t\t\t\t<Id>');
-    lines.push('\t\t\t\t\t\t<PrvtId>');
-    lines.push('\t\t\t\t\t\t\t<Othr>');
-    lines.push('\t\t\t\t\t\t\t\t<Id>' + escapeXml_(fam.nom || fam.cognoms) + '</Id>');
-    lines.push('\t\t\t\t\t\t\t\t<Issr>DNI</Issr>');
-    lines.push('\t\t\t\t\t\t\t</Othr>');
-    lines.push('\t\t\t\t\t\t</PrvtId>');
-    lines.push('\t\t\t\t\t</Id>');
     lines.push('\t\t\t\t</Dbtr>');
 
     // Debtor Account
@@ -431,6 +428,21 @@ function escapeXml_(s) {
  */
 function formatDate_(d) {
   return d.getFullYear() + '-' + padZero_(d.getMonth() + 1, 2) + '-' + padZero_(d.getDate(), 2);
+}
+
+/**
+ * Retorna la data resultant d'avançar N dies hàbils (dilluns-divendres)
+ * a partir d'una data base.
+ */
+function nextBusinessDay_(from, businessDays) {
+  var d = new Date(from.getTime());
+  var added = 0;
+  while (added < businessDays) {
+    d.setDate(d.getDate() + 1);
+    var dow = d.getDay(); // 0=diumenge, 6=dissabte
+    if (dow !== 0 && dow !== 6) added++;
+  }
+  return d;
 }
 
 /**

@@ -639,8 +639,8 @@ function buildConfirmationEmailHtml_(nom, iban, editUrl, baixaUrl, ibanInvalid) 
   <p>Si us plau, reviseu les vostres dades i actualitzeu-les si cal fent clic al bot&oacute; seg&uuml;ent:</p>
 
   <p style="text-align: center; margin: 24px 0;">
-    <a href="${editUrl}" style="background-color: #0b6; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;">
-      Revisar i actualitzar les meves dades
+    <a href="${editUrl}" style="background-color: #0b6; color: #ffffff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;">
+      <span style="color: #ffffff;">Revisar i actualitzar les meves dades</span>
     </a>
   </p>
 

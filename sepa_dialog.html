@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Google Sans', Arial, sans-serif; padding: 24px; color: #202124; background: #fff; }
+
+  .field { margin-bottom: 20px; }
+  label { display: block; font-size: 13px; font-weight: 500; color: #5f6368; margin-bottom: 6px; }
+  input[type="date"],
+  input[type="number"],
+  input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #202124;
+    transition: border-color 0.2s;
+  }
+  input:focus { border-color: #1a73e8; outline: none; box-shadow: 0 0 0 2px rgba(26,115,232,0.15); }
+  .hint { font-size: 12px; color: #80868b; margin-top: 4px; }
+
+  .buttons { margin-top: 24px; display: flex; justify-content: flex-end; gap: 10px; }
+  button {
+    padding: 9px 22px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-cancel { background: #fff; border: 1px solid #dadce0; color: #5f6368; }
+  .btn-cancel:hover { background: #f8f9fa; }
+  .btn-submit { background: #1a73e8; border: none; color: #fff; }
+  .btn-submit:hover { background: #1765cc; }
+  .btn-submit:disabled { background: #dadce0; cursor: default; }
+
+  #loading { display: none; text-align: center; padding: 40px 0; }
+  #loading p { color: #5f6368; margin-top: 12px; }
+  .spinner {
+    width: 36px; height: 36px;
+    border: 3px solid #dadce0; border-top-color: #1a73e8;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #error-msg { display: none; color: #d93025; font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<div id="form">
+  <div class="field">
+    <label for="date">Data de cobrament</label>
+    <input type="date" id="date">
+    <div class="hint">El m&iacute;nim per SEPA s&oacute;n 2 dies h&agrave;bils a partir d'avui.</div>
+  </div>
+
+  <div class="field">
+    <label for="amount">Import per fam&iacute;lia (&euro;)</label>
+    <input type="number" id="amount" step="0.01" min="0.01">
+  </div>
+
+  <div class="field">
+    <label for="remittance">Concepte del rebut</label>
+    <input type="text" id="remittance">
+  </div>
+
+  <div id="error-msg"></div>
+
+  <div class="buttons">
+    <button class="btn-cancel" onclick="google.script.host.close()">Cancel&middot;lar</button>
+    <button class="btn-submit" id="btn-submit" onclick="submit()">Generar SEPA</button>
+  </div>
+</div>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <p>Generant fitxer SEPA...</p>
+</div>
+
+<script>
+  // Defaults are injected server-side via template scriptlets
+  document.getElementById('date').value = <?!= JSON.stringify(defaultDate) ?>;
+  document.getElementById('amount').value = <?!= JSON.stringify(defaultAmount) ?>;
+  document.getElementById('remittance').value = <?!= JSON.stringify(defaultRemittance) ?>;
+
+  function showError(msg) {
+    var el = document.getElementById('error-msg');
+    el.textContent = msg;
+    el.style.display = 'block';
+  }
+
+  function submit() {
+    var date = document.getElementById('date').value;
+    var amount = document.getElementById('amount').value;
+    var remittance = document.getElementById('remittance').value.trim();
+
+    // Client-side validation
+    if (!date) { showError('Cal indicar la data de cobrament.'); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { showError('Format de data inv\u00e0lid (YYYY-MM-DD).'); return; }
+    if (!amount || parseFloat(amount) <= 0) { showError('Import inv\u00e0lid.'); return; }
+    if (!remittance) { showError('Cal indicar el concepte.'); return; }
+
+    // Show loading, hide form
+    document.getElementById('form').style.display = 'none';
+    document.getElementById('loading').style.display = 'block';
+
+    google.script.run
+      .withSuccessHandler(function() { google.script.host.close(); })
+      .withFailureHandler(function(e) {
+        document.getElementById('form').style.display = 'block';
+        document.getElementById('loading').style.display = 'none';
+        showError('Error: ' + (e.message || e));
+      })
+      .generateSepaWithParams(date, amount, remittance);
+  }
+</script>
+
+</body>
+</html>

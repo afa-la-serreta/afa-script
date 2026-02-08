@@ -77,6 +77,7 @@ L'objectiu és:
 | `families.js` | Entry points: `onOpen`, `importAll`, `findPotentialDuplicatesAll`, `onFormSubmit`, `syncEdited`, `deactivateGraduatedFamilies`, `sendConfirmationEmails` |
 | `webapp.js` | Web app per edició via magic link i baixa voluntària |
 | `sepa.js` | Generació XML SEPA Direct Debit (pain.008.001.02 / Cuaderno 19.44) |
+| `sepa_dialog.html` | Formulari HTML per als paràmetres SEPA (data picker, import, concepte) |
 | `index.html` | Frontend del formulari d'edició |
 | `bic_bancs_seed.csv` | Dades inicials per al full `BIC Bancs` (16 bancs extrets del XML 2024-2025) |
 
@@ -129,7 +130,7 @@ El correu inclou:
 - Enllaç per donar-se de baixa (baixa voluntària via webapp)
 
 ### Generació de rebuts SEPA (pas 3)
-1. Introduir: data de cobrament, import (per defecte 35 EUR), concepte
+1. S'obre un formulari amb data picker, import (per defecte 35 EUR) i concepte pre-omplerts
 2. El BIC/SWIFT es resol automàticament per cada família:
    - Primer consulta el full `BIC Bancs` (cache)
    - Si no el troba, consulta IBANAPI (i guarda el resultat al full)
