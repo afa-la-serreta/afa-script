@@ -390,3 +390,29 @@ function applyGraduationStatus_(row, idxC, mode) {
   }
   return false;
 }
+
+/* =========================
+   Helpers de presentació
+   ========================= */
+
+/**
+ * Retorna l'etiqueta del curs acadèmic actual (ex: "2025-2026").
+ */
+function currentSchoolYear_() {
+  var now = new Date();
+  var year = now.getFullYear();
+  var month = now.getMonth();
+  var startYear = month >= 8 ? year : year - 1;
+  return startYear + '-' + (startYear + 1);
+}
+
+/**
+ * Genera una barra HTML proporcional per a un valor dins d'un total.
+ */
+function makeBar_(value, total) {
+  if (!total || !value) return '<span class="bar-label">0%</span>';
+  var pct = Math.round(value / total * 100);
+  var width = Math.max(2, Math.round(value / total * 100));
+  return '<span class="bar" style="width:' + width + 'px;"></span>' +
+    '<span class="bar-label">' + pct + '%</span>';
+}

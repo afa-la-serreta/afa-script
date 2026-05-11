@@ -1013,3 +1013,129 @@ function showEditUrlForActiveRow() {
   ).setWidth(560).setHeight(220);
   ui.showModalDialog(html, 'Enllaç d\'edició');
 }
+
+/* =========================
+   Distribució per cursos
+   ========================= */
+
+/**
+ * Mostra una taula resum amb la distribució d'infants i famílies
+ * actives per curs escolar (I3..6è), més les famílies sense dades
+ * d'infants (N/A). Ajuda a detectar cursos amb poca participació.
+ */
+function gradeDistribution() {
+  var ss = SpreadsheetApp.getActive();
+  var canon = ss.getSheetByName(SHEET_CANON);
+  if (!canon) throw new Error('No trobo la pestanya: ' + SHEET_CANON);
+
+  var values = canon.getDataRange().getValues();
+  if (values.length < 2) throw new Error('No hi ha dades a ' + SHEET_CANON);
+
+  var headers = values[0].map(function(h) { return String(h).trim(); });
+  var idx = headerIndex_(headers);
+
+  ['status', 'c1_nom', 'c1_dob', 'c2_nom', 'c2_dob', 'c3_nom', 'c3_dob', 'c4_nom', 'c4_dob'].forEach(function(c) {
+    if (idx[c] == null) throw new Error('Falta la columna ' + c + ' a ' + SHEET_CANON);
+  });
+
+  var gradeLabels = ['I3', 'I4', 'I5', '1r', '2n', '3r', '4t', '5\u00e8', '6\u00e8'];
+  var childCount = {};
+  var familyCount = {};
+  gradeLabels.forEach(function(g) { childCount[g] = 0; familyCount[g] = 0; });
+
+  var totalActive = 0;
+  var familiesNoData = 0;
+  var childrenGraduated = 0;
+
+  var childSlots = [
+    { nom: 'c1_nom', dob: 'c1_dob' },
+    { nom: 'c2_nom', dob: 'c2_dob' },
+    { nom: 'c3_nom', dob: 'c3_dob' },
+    { nom: 'c4_nom', dob: 'c4_dob' }
+  ];
+
+  for (var r = 1; r < values.length; r++) {
+    var row = values[r];
+    if (String(row[idx.status]).trim() !== 'ACTIVE') continue;
+    totalActive++;
+
+    var familyGrades = {};
+    var hasAnyChild = false;
+
+    for (var s = 0; s < childSlots.length; s++) {
+      var childNom = (row[idx[childSlots[s].nom]] || '').toString().trim();
+      if (!childNom || /^[.\-_]+$/.test(childNom) || childNom.length < 2) continue;
+
+      hasAnyChild = true;
+      var birthYear = extractBirthYear_(row[idx[childSlots[s].dob]]);
+      var grade = childGrade_(birthYear);
+
+      if (grade) {
+        childCount[grade]++;
+        familyGrades[grade] = true;
+      } else {
+        childrenGraduated++;
+      }
+    }
+
+    if (!hasAnyChild) {
+      familiesNoData++;
+    }
+
+    for (var g in familyGrades) {
+      familyCount[g]++;
+    }
+  }
+
+  // Build HTML dialog
+  var totalChildren = 0;
+  var totalFamiliesWithGrade = 0;
+  var rows = gradeLabels.map(function(g) {
+    totalChildren += childCount[g];
+    totalFamiliesWithGrade += familyCount[g];
+    return '<tr>' +
+      '<td style="padding:6px 14px; font-weight:600;">' + g + '</td>' +
+      '<td style="padding:6px 14px; text-align:right;">' + childCount[g] + '</td>' +
+      '<td style="padding:6px 14px; text-align:right;">' + familyCount[g] + '</td>' +
+      '<td style="padding:6px 14px;">' + makeBar_(familyCount[g], totalActive) + '</td>' +
+      '</tr>';
+  });
+
+  // N/A row (families without children data)
+  rows.push(
+    '<tr style="border-top:2px solid #999;">' +
+    '<td style="padding:6px 14px; font-weight:600; color:#888;">N/A</td>' +
+    '<td style="padding:6px 14px; text-align:right; color:#888;">\u2014</td>' +
+    '<td style="padding:6px 14px; text-align:right; color:#888;">' + familiesNoData + '</td>' +
+    '<td style="padding:6px 14px;">' + makeBar_(familiesNoData, totalActive) + '</td>' +
+    '</tr>'
+  );
+
+  var html = '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+    '<style>' +
+    'body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 16px; color: #333; }' +
+    'table { border-collapse: collapse; width: 100%; margin: 12px 0; }' +
+    'th { padding: 8px 14px; text-align: left; border-bottom: 2px solid #333; font-size: 13px; }' +
+    'tr:nth-child(even) { background: #f5f5f5; }' +
+    '.bar { height: 16px; background: #1b5e20; border-radius: 3px; display: inline-block; vertical-align: middle; }' +
+    '.bar-label { font-size: 12px; color: #666; margin-left: 6px; vertical-align: middle; }' +
+    '.summary { background: #e8f5e9; border-radius: 8px; padding: 12px 16px; margin-top: 16px; font-size: 13px; }' +
+    '</style></head><body>' +
+    '<p style="margin:0 0 12px 0; color:#666; font-size:13px;">Fam\u00edlies ACTIVE &mdash; curs ' + currentSchoolYear_() + '</p>' +
+    '<table>' +
+    '<tr><th>Curs</th><th style="text-align:right;">Infants</th><th style="text-align:right;">Fam\u00edlies</th><th style="min-width:120px;">Proporci\u00f3</th></tr>' +
+    rows.join('\n') +
+    '</table>' +
+    '<div class="summary">' +
+    '<b>' + totalActive + '</b> fam\u00edlies actives en total<br>' +
+    '<b>' + totalChildren + '</b> infants en cursos actius (I3\u20136\u00e8)<br>' +
+    (childrenGraduated ? '<b>' + childrenGraduated + '</b> infants graduats (encara registrats)<br>' : '') +
+    (familiesNoData ? '<b>' + familiesNoData + '</b> fam\u00edlies sense dades d\u2019infants' : '') +
+    '</div>' +
+    '</body></html>';
+
+  var output = HtmlService.createHtmlOutput(html)
+    .setWidth(520)
+    .setHeight(560);
+  SpreadsheetApp.getUi().showModalDialog(output, 'Distribuci\u00f3 per cursos');
+}
