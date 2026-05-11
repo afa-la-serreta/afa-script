@@ -21,12 +21,15 @@ function onOpen() {
 
   var advanced = ui.createMenu('\uD83D\uDD27 Avançat')
     .addItem('\uD83D\uDCE5 Importar totes les respostes', 'importAll')
-    .addItem('\uD83D\uDD0D Buscar possibles duplicats', 'findPotentialDuplicatesAll');
+    .addItem('\uD83D\uDD0D Buscar possibles duplicats', 'findPotentialDuplicatesAll')
+    .addItem('\uD83D\uDD04 Refrescar enlla\u00e7os d\u0027edici\u00f3', 'refreshEditUrls');
 
   ui.createMenu('\uD83C\uDF4E AFA')
     .addItem('1\uFE0F\u20E3 Desactivar fam\u00edlies graduades (6\u00e8)', 'deactivateGraduatedFamilies')
     .addItem('2\uFE0F\u20E3 Enviar correu de confirmaci\u00f3', 'sendConfirmationEmails')
     .addItem('3\uFE0F\u20E3 Generar fitxer SEPA (rebuts)', 'generateSepaXml')
+    .addSeparator()
+    .addItem('\uD83D\uDD17 Enlla\u00e7 d\u0027edici\u00f3 (fila activa)', 'showEditUrlForActiveRow')
     .addSeparator()
     .addSubMenu(advanced)
     .addToUi();
@@ -376,6 +379,9 @@ function sendConfirmationEmails() {
   if (!canon) throw new Error(`No trobo la pestanya: ${SHEET_CANON}`);
   if (!respSheet) throw new Error(`No trobo la pestanya: ${SHEET_RESPONSES}`);
 
+  // Assegurar que existeix la columna cau de l'edit URL
+  ensureCanonColumn_(canon, 'edit_url');
+
   // Detectar enviament en curs
   const allValues = canon.getDataRange().getValues();
   const allHeaders = allValues[0].map(function(h) { return String(h).trim(); });
@@ -530,6 +536,11 @@ function sendConfirmationEmails() {
     if (!editUrl) {
       skipped.push(`Fila ${r + 1} (${email}): sense URL d'edici\u00f3 del form`);
       continue;
+    }
+
+    // Cau l'edit URL al full per fer lookups ràpids després
+    if (idx.edit_url != null && row[idx.edit_url] !== editUrl) {
+      canon.getRange(r + 1, idx.edit_url + 1).setValue(editUrl);
     }
 
     // URL de baixa voluntària via webapp
@@ -818,4 +829,187 @@ function previewAllConfirmationEmails() {
   var file = DriveApp.createFile('preview_correus_afa.html', fullHtml, MimeType.HTML);
   Logger.log('Preview creada: ' + file.getUrl());
   SpreadsheetApp.getActive().toast('Preview creada a Google Drive.\n' + file.getUrl(), 'Preview ✓');
+}
+
+/* =========================
+   Cau d'enllaços d'edició (column `edit_url` a Famílies)
+   ========================= */
+
+/**
+ * Assegura que existeix una columna anomenada `name` al full canònic.
+ * Si no hi és, l'afegeix al final. Retorna l'índex 0-based de la columna.
+ */
+function ensureCanonColumn_(canon, name) {
+  const lastCol = canon.getLastColumn();
+  const headers = canon.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim());
+  const existing = headers.indexOf(name);
+  if (existing >= 0) return existing;
+
+  const newCol = lastCol + 1;
+  canon.getRange(1, newCol).setValue(name);
+  return newCol - 1;
+}
+
+/**
+ * Construeix els mapes timestamp/email → editResponseUrl a partir del Form vinculat.
+ * Extret de sendConfirmationEmails per reutilitzar-lo des d'altres punts.
+ */
+function buildEditUrlMaps_(respSheet) {
+  const formUrl = respSheet.getFormUrl();
+  if (!formUrl) throw new Error('El full de respostes no està vinculat a cap Google Form.');
+
+  const form = FormApp.openByUrl(formUrl);
+  const formResponses = form.getResponses();
+
+  const byTs = new Map();
+  for (const resp of formResponses) {
+    const ts = resp.getTimestamp().getTime();
+    const editUrl = resp.getEditResponseUrl();
+    if (editUrl) byTs.set(ts, editUrl);
+  }
+
+  const byEmail = new Map();
+  const respValues = respSheet.getDataRange().getValues();
+  if (respValues.length > 1) {
+    const respHeaders = makeUniqueHeaders_(respValues[0].map(h => (h == null ? '' : String(h))));
+    const emailColIdx = respHeaders.indexOf('Correu electrònic:');
+    const tsColIdx = respHeaders.indexOf('Marca temporal');
+    if (emailColIdx >= 0 && tsColIdx >= 0) {
+      for (let i = 1; i < respValues.length; i++) {
+        const email = normEmail_(respValues[i][emailColIdx]);
+        const rowTs = respValues[i][tsColIdx];
+        if (!email || !rowTs) continue;
+        const tsMs = (rowTs instanceof Date) ? rowTs.getTime() : new Date(rowTs).getTime();
+        if (isNaN(tsMs)) continue;
+        const editUrl = byTs.get(tsMs);
+        if (editUrl) byEmail.set(email, editUrl);
+      }
+    }
+  }
+  return { byTs, byEmail };
+}
+
+/**
+ * Donada una fila canònica (valors ja llegits) i els mapes, retorna l'editResponseUrl
+ * fent servir primer la coincidència per source_last_timestamp i, com a fallback, per email.
+ */
+function resolveEditUrlFromMaps_(row, idx, maps) {
+  const ts = row[idx.source_last_timestamp];
+  let editUrl = null;
+  if (ts instanceof Date) {
+    editUrl = maps.byTs.get(ts.getTime()) || null;
+  } else if (ts) {
+    const d = new Date(ts);
+    if (!isNaN(d.getTime())) editUrl = maps.byTs.get(d.getTime()) || null;
+  }
+  if (!editUrl) {
+    const email = normEmail_(row[idx.g1_email]);
+    if (email) editUrl = maps.byEmail.get(email) || null;
+  }
+  return editUrl;
+}
+
+/**
+ * Refresca la columna `edit_url` de totes les famílies recalculant-la
+ * a partir de les respostes del Form. Útil quan canvien respostes
+ * o cal omplir la cau per primer cop.
+ */
+function refreshEditUrls() {
+  const ss = SpreadsheetApp.getActive();
+  const ui = SpreadsheetApp.getUi();
+  const canon = ss.getSheetByName(SHEET_CANON);
+  const respSheet = ss.getSheetByName(SHEET_RESPONSES);
+  if (!canon) throw new Error(`No trobo la pestanya: ${SHEET_CANON}`);
+  if (!respSheet) throw new Error(`No trobo la pestanya: ${SHEET_RESPONSES}`);
+
+  ensureCanonColumn_(canon, 'edit_url');
+
+  ss.toast('Recopilant respostes del Form...', 'Refresc');
+  const maps = buildEditUrlMaps_(respSheet);
+
+  const values = canon.getDataRange().getValues();
+  if (values.length < 2) {
+    ui.alert('No hi ha files a Famílies.');
+    return;
+  }
+  const headers = values[0].map(h => String(h).trim());
+  const idx = headerIndex_(headers);
+  if (idx.edit_url == null) throw new Error('Falta la columna edit_url després d\'assegurar-la.');
+
+  let updated = 0;
+  let unchanged = 0;
+  let missing = 0;
+
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const editUrl = resolveEditUrlFromMaps_(row, idx, maps);
+    if (!editUrl) { missing++; continue; }
+    if (row[idx.edit_url] === editUrl) { unchanged++; continue; }
+    canon.getRange(r + 1, idx.edit_url + 1).setValue(editUrl);
+    updated++;
+  }
+
+  ss.toast(`${updated} actualitzades, ${unchanged} ja al dia, ${missing} sense URL`, 'Refresc ✓');
+}
+
+/**
+ * Mostra l'enllaç d'edició del Google Form per a la fila seleccionada del full Famílies.
+ * Llegeix la cau (`edit_url`) si està disponible; si no, la calcula i la desa.
+ */
+function showEditUrlForActiveRow() {
+  const ss = SpreadsheetApp.getActive();
+  const ui = SpreadsheetApp.getUi();
+  const canon = ss.getSheetByName(SHEET_CANON);
+  if (!canon) throw new Error(`No trobo la pestanya: ${SHEET_CANON}`);
+
+  const cell = ss.getActiveCell();
+  if (!cell || cell.getSheet().getName() !== SHEET_CANON) {
+    ui.alert('Posa el cursor en una fila del full «' + SHEET_CANON + '».');
+    return;
+  }
+  const r = cell.getRow();
+  if (r < 2) {
+    ui.alert('Selecciona una fila de dades (no la capçalera).');
+    return;
+  }
+
+  ensureCanonColumn_(canon, 'edit_url');
+
+  const lastCol = canon.getLastColumn();
+  const headers = canon.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h).trim());
+  const idx = headerIndex_(headers);
+  const row = canon.getRange(r, 1, 1, lastCol).getValues()[0];
+
+  let editUrl = (row[idx.edit_url] || '').toString().trim() || null;
+
+  if (!editUrl) {
+    const respSheet = ss.getSheetByName(SHEET_RESPONSES);
+    if (!respSheet) throw new Error(`No trobo la pestanya: ${SHEET_RESPONSES}`);
+    const maps = buildEditUrlMaps_(respSheet);
+    editUrl = resolveEditUrlFromMaps_(row, idx, maps);
+    if (editUrl) {
+      canon.getRange(r, idx.edit_url + 1).setValue(editUrl);
+    }
+  }
+
+  if (!editUrl) {
+    ui.alert('No hi ha cap resposta del Form que coincideixi amb aquesta fila (ni per timestamp ni per email).');
+    return;
+  }
+
+  const nom = (row[idx.g1_nom] || '').toString().trim();
+  const cognoms = (row[idx.g1_cognoms] || '').toString().trim();
+  const familyId = (row[idx.family_id] || '').toString().trim();
+  const titol = [nom, cognoms].filter(Boolean).join(' ') || familyId;
+
+  const safeUrl = editUrl.replace(/"/g, '&quot;');
+  const html = HtmlService.createHtmlOutput(
+    '<div style="font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 8px 4px;">' +
+    '  <p style="margin: 0 0 12px 0;"><b>' + escapeHtml_(titol) + '</b></p>' +
+    '  <p style="margin: 0 0 8px 0;"><a href="' + safeUrl + '" target="_blank">Obrir el formulari per editar</a></p>' +
+    '  <textarea readonly style="width:100%; height:80px; font-family: monospace;" onclick="this.select()">' + safeUrl + '</textarea>' +
+    '  <p style="margin: 12px 0 0 0; font-size: 12px; color: #666;">Fes clic al text per seleccionar-lo i copiar-lo.</p>' +
+    '</div>'
+  ).setWidth(560).setHeight(220);
+  ui.showModalDialog(html, 'Enllaç d\'edició');
 }
